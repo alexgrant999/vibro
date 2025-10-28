@@ -12,7 +12,7 @@ export const soundFiles = [
     file: "https://vibro-accoustic-bucket.s3.ap-southeast-2.amazonaws.com/rain-sound-and-rainforest-6293+(1).mp3",
   },
   {
-    name: "Atmospheric Pads",
+    name: "Atmospheric",
     file: "https://vibro-accoustic-bucket.s3.ap-southeast-2.amazonaws.com/SD_+Atmo+Pad+8.mp3",
   },
   {
