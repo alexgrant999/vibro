@@ -5,8 +5,8 @@ import { getAudioContext } from "./audioContext";
 
 export default function Pad({ name, url }) {
   const [isPlaying, setIsPlaying] = useState(false);
-  const [volume, setVolume] = useState(0.8);
-  const [loop, setLoop] = useState(false);
+  const [volume, setVolume] = useState(0.4);
+  const [loop, setLoop] = useState(true);
   const [lowPassEnabled, setLowPassEnabled] = useState(false);
   const [lowPassFreq, setLowPassFreq] = useState(5000); // Hz
   const [currentTime, setCurrentTime] = useState(0);
