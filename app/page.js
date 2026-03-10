@@ -134,31 +134,29 @@ export default function Home() {
           ⚙️ Master Control
         </h2>
 
-        {/* Two Column Layout */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: "40px",
-            alignItems: "start",
-          }}
-        >
-          {/* Left Column - Presets */}
-          <div>
-            <h3
-              style={{
-                fontSize: "14px",
-                fontWeight: "600",
-                marginBottom: "16px",
-                color: "#8ef59d",
-              }}
-            >
-              ✨ Preset Mixes
-            </h3>
+        {/* Oscillator */}
+        <OscillatorUnit
+          ref={oscillatorRef}
+          id={1}
+          initialFreq={null}
+        />
+
+        {/* Presets */}
+        <div style={{ marginTop: "28px" }}>
+          <h3
+            style={{
+              fontSize: "14px",
+              fontWeight: "600",
+              marginBottom: "16px",
+              color: "#8ef59d",
+            }}
+          >
+            ✨ Preset Mixes
+          </h3>
             <div
               style={{
                 display: "flex",
-                flexDirection: "column",
+                flexWrap: "wrap",
                 gap: "10px",
               }}
             >
@@ -294,16 +292,6 @@ export default function Home() {
                 </button>
               ))}
             </div>
-          </div>
-
-          {/* Right Column - Oscillator */}
-          <div>
-            <OscillatorUnit
-              ref={oscillatorRef}
-              id={1}
-              initialFreq={null}
-            />
-          </div>
         </div>
 
         {/* Shamanic Flourish Button */}
