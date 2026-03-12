@@ -50,6 +50,18 @@ export const soundFiles = [
   { name: "🥁 Frame Drum", file: "frame-drum-new.wav" },
   { name: "🥁 Warm Kick", file: "warm-kick.wav" },
 
+  // Nature Sounds
+  { name: "🌲 Forest Sounds", file: "nature-forest.wav" },
+  { name: "🐦 Birds Springtime", file: "nature-birds-springtime.wav" },
+  { name: "🌧️ Rainforest Rain", file: "nature-rainforest-rain.wav" },
+  { name: "💧 Water Stream", file: "nature-water-stream.wav" },
+  { name: "🌙 Jungle Night", file: "nature-jungle-night.wav" },
+  { name: "🦗 Crickets", file: "nature-crickets.wav" },
+  { name: "🐸 Frogs & Crickets", file: "nature-frogs-crickets.wav" },
+  { name: "🌊 Ocean & Jungle", file: "nature-ocean-jungle.wav" },
+  { name: "🌬️ Cosmic Winds", file: "nature-cosmic-winds.wav" },
+  { name: "🎐 Wind Chimes", file: "nature-wind-chimes.wav" },
+
   // Shamanic Effects
   { name: "Ocarina Call 1", file: "ocarina-call-1.wav" },
   { name: "Ocarina Call 2", file: "ocarina-call-2.wav" },

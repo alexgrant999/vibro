@@ -20,7 +20,23 @@ export default function Pad({ name, url, listView = false }) {
   const startTimeRef = useRef(0);
   const pausedAtRef = useRef(0);
   const intervalRef = useRef(null);
+  const fadeIntervalRef = useRef(null);
+  const targetVolumeRef = useRef(0.4);
   const canvasRef = useRef(null);
+
+  const startFadeTracking = (durationMs) => {
+    clearInterval(fadeIntervalRef.current);
+    const end = Date.now() + durationMs;
+    fadeIntervalRef.current = setInterval(() => {
+      if (gainNodeRef.current) {
+        setVolume(gainNodeRef.current.gain.value);
+      }
+      if (Date.now() >= end) {
+        clearInterval(fadeIntervalRef.current);
+        if (gainNodeRef.current) setVolume(gainNodeRef.current.gain.value);
+      }
+    }, 100);
+  };
 
   // -------- PLAYBACK --------
   const handleTogglePlay = async () => {
@@ -31,9 +47,17 @@ export default function Pad({ name, url, listView = false }) {
 
     // --- STOP if already playing ---
     if (isPlaying && sourceRef.current) {
-      try {
-        sourceRef.current.stop();
-      } catch (_) {}
+      // Fade out over 10 seconds then stop
+      if (gainNodeRef.current) {
+        gainNodeRef.current.gain.cancelScheduledValues(ctx.currentTime);
+        gainNodeRef.current.gain.setValueAtTime(gainNodeRef.current.gain.value, ctx.currentTime);
+        gainNodeRef.current.gain.linearRampToValueAtTime(0, ctx.currentTime + 10);
+        startFadeTracking(10000);
+      }
+      const src = sourceRef.current;
+      setTimeout(() => {
+        try { src.stop(); } catch (_) {}
+      }, 10000);
       pausedAtRef.current = ctx.currentTime - startTimeRef.current;
       clearInterval(intervalRef.current);
       setIsPlaying(false);
@@ -45,9 +69,12 @@ export default function Pad({ name, url, listView = false }) {
     // --- SETUP NODES ---
     if (!gainNodeRef.current) {
       const gain = ctx.createGain();
-      gain.gain.value = volume;
+      gain.gain.value = 0;
       gain.connect(ctx.destination);
       gainNodeRef.current = gain;
+    } else {
+      gainNodeRef.current.gain.cancelScheduledValues(ctx.currentTime);
+      gainNodeRef.current.gain.setValueAtTime(0, ctx.currentTime);
     }
 
     // Always rebuild the filter node
@@ -79,6 +106,11 @@ export default function Pad({ name, url, listView = false }) {
       const offset = pausedAtRef.current;
       startTimeRef.current = ctx.currentTime - offset;
       source.start(0, offset);
+
+      // Fade in over 10 seconds
+      targetVolumeRef.current = volume;
+      gainNodeRef.current.gain.linearRampToValueAtTime(volume, ctx.currentTime + 10);
+      startFadeTracking(10000);
 
       // --- TIMELINE SYNC ---
       clearInterval(intervalRef.current);
@@ -118,14 +150,18 @@ export default function Pad({ name, url, listView = false }) {
   // -------- CONTROLS --------
   const handleVolumeChange = (e) => {
     const newVol = e.target.value / 100;
+    clearInterval(fadeIntervalRef.current);
+    targetVolumeRef.current = newVol;
     setVolume(newVol);
-    if (gainNodeRef.current)
-      gainNodeRef.current.gain.setValueAtTime(newVol, ctx.currentTime);
+    if (gainNodeRef.current) {
+      const actx = getAudioContext();
+      gainNodeRef.current.gain.cancelScheduledValues(actx.currentTime);
+      gainNodeRef.current.gain.setValueAtTime(newVol, actx.currentTime);
+    }
   };
 
   // Revised handleScrub function
   const handleScrub = async (e) => {
-    const ctx = getAudioContext();
     const newTime = parseFloat(e.target.value);
     const wasPlaying = isPlaying;
 
@@ -194,6 +230,7 @@ export default function Pad({ name, url, listView = false }) {
   useEffect(() => {
     return () => {
       clearInterval(intervalRef.current);
+      clearInterval(fadeIntervalRef.current);
       if (sourceRef.current) sourceRef.current.stop();
     };
   }, []);

@@ -25,6 +25,15 @@ const PadGridComponent = forwardRef(function PadGrid(props, ref) {
     }
   };
 
+  const stopAll = () => {
+    const buttons = document.querySelectorAll('[data-stop-button]');
+    buttons.forEach((btn) => {
+      if (btn.textContent.includes('⏹')) {
+        btn.click();
+      }
+    });
+  };
+
   const playPads = (padNames) => {
     // Play specific pads by name
     const buttons = document.querySelectorAll('[data-pad-name]');
@@ -45,6 +54,7 @@ const PadGridComponent = forwardRef(function PadGrid(props, ref) {
     addOscillatorWithFreq: setOscillatorFreq,
     setOscillatorParams,
     playPads,
+    stopAll,
   }));
 
   return (
@@ -89,6 +99,31 @@ const PadGridComponent = forwardRef(function PadGrid(props, ref) {
           }}
         >
           📊 Grid View
+        </button>
+        <button
+          onClick={stopAll}
+          style={{
+            background: "linear-gradient(180deg, #3a1717, #2a0f0f)",
+            border: "1px solid #8a4a4a",
+            borderRadius: "10px",
+            color: "#ff9999",
+            padding: "10px 16px",
+            cursor: "pointer",
+            fontSize: "14px",
+            fontWeight: "600",
+            transition: "all 0.2s ease",
+            marginLeft: "auto",
+          }}
+          onMouseEnter={(e) => {
+            e.target.style.borderColor = "#ff6666";
+            e.target.style.color = "#ff6666";
+          }}
+          onMouseLeave={(e) => {
+            e.target.style.borderColor = "#8a4a4a";
+            e.target.style.color = "#ff9999";
+          }}
+        >
+          ⏹ Stop All
         </button>
         <button
           onClick={() => setViewMode("list")}

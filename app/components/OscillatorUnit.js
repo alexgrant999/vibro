@@ -76,11 +76,11 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
   const [volume, setVolume] = useState(0.15);
 
   // Sweep ranges [min, max] — min is the fixed frequency when sweep is off
-  const [carrierRange, setCarrierRange] = useState([100, 140]);
-  const [beatRange, setBeatRange] = useState([10, 20]);
+  const [carrierRange, setCarrierRange] = useState([40, 140]);
+  const [beatRange, setBeatRange] = useState([4, 8]);
 
   // Sweep switches
-  const [carrierSweep, setCarrierSweep] = useState(false);
+  const [carrierSweep, setCarrierSweep] = useState(true);
   const [beatSweep, setBeatSweep] = useState(false);
 
   // Sweep speeds
@@ -88,12 +88,12 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
   const [beatSpeed, setBeatSpeed] = useState(0.15);
 
   // Live display values
-  const [displayCarrier, setDisplayCarrier] = useState(100);
-  const [displayBeat, setDisplayBeat] = useState(10);
+  const [displayCarrier, setDisplayCarrier] = useState(40);
+  const [displayBeat, setDisplayBeat] = useState(4);
 
   // Refs for sweep interval (avoid stale closures)
-  const carrierRangeRef = useRef([100, 140]);
-  const beatRangeRef = useRef([10, 20]);
+  const carrierRangeRef = useRef([40, 140]);
+  const beatRangeRef = useRef([4, 8]);
   const carrierSpeedRef = useRef(0.3);
   const beatSpeedRef = useRef(0.15);
   // Current sweep values and directions (bounce between min/max)
@@ -102,6 +102,7 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
   const beatValRef = useRef(null);
   const beatDirRef = useRef(1);
   const sweepTickRef = useRef(null);
+  const fadeIntervalRef = useRef(null);
 
   useEffect(() => { carrierRangeRef.current = carrierRange; }, [carrierRange]);
   useEffect(() => { beatRangeRef.current = beatRange; }, [beatRange]);
@@ -162,12 +163,23 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
     return () => clearInterval(sweepTickRef.current);
   }, [carrierSweep, beatSweep]);
 
+  const startFadeTracking = (durationMs) => {
+    clearInterval(fadeIntervalRef.current);
+    const end = Date.now() + durationMs;
+    fadeIntervalRef.current = setInterval(() => {
+      if (masterGainRef.current) setVolume(masterGainRef.current.gain.value);
+      if (Date.now() >= end) clearInterval(fadeIntervalRef.current);
+    }, 100);
+  };
+
   // --- START/STOP HANDLER ---
   useEffect(() => {
     if (isPlaying) {
       const masterGain = ctx.createGain();
-      masterGain.gain.value = volume;
+      masterGain.gain.value = 0;
       masterGain.connect(ctx.destination);
+      masterGain.gain.linearRampToValueAtTime(volume, ctx.currentTime + 10);
+      startFadeTracking(10000);
 
       const merger = ctx.createChannelMerger(2);
       merger.connect(masterGain);
@@ -199,12 +211,29 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
     };
   }, [isPlaying]);
 
-  // Volume live update
+  // Volume live update (only when not fading)
   useEffect(() => {
-    if (masterGainRef.current) masterGainRef.current.gain.value = volume;
+    if (masterGainRef.current && !fadeIntervalRef.current) {
+      masterGainRef.current.gain.value = volume;
+    }
   }, [volume]);
 
-  const toggle = () => setIsPlaying((prev) => !prev);
+  const toggle = () => {
+    if (isPlaying && masterGainRef.current) {
+      // Fade out over 10s then stop
+      const gain = masterGainRef.current;
+      gain.gain.cancelScheduledValues(ctx.currentTime);
+      gain.gain.setValueAtTime(gain.gain.value, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 10);
+      startFadeTracking(10000);
+      setTimeout(() => {
+        [oscLeftRef, oscRightRef].forEach((r) => { try { r.current?.stop(); } catch {} });
+      }, 10000);
+      setIsPlaying(false);
+    } else {
+      setIsPlaying(true);
+    }
+  };
 
   const setParams = (params) => {
     if (params.carrierFreq !== undefined) {
@@ -269,7 +298,16 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
         }}>
           <span style={{ fontSize: "13px", color: "#8ef59d", fontWeight: "700" }}>{(volume * 100).toFixed(0)}%</span>
           <input type="range" min="0" max="0.3" step="0.01" value={volume}
-            onChange={(e) => setVolume(parseFloat(e.target.value))}
+            onChange={(e) => {
+              clearInterval(fadeIntervalRef.current);
+              fadeIntervalRef.current = null;
+              const v = parseFloat(e.target.value);
+              setVolume(v);
+              if (masterGainRef.current) {
+                masterGainRef.current.gain.cancelScheduledValues(ctx.currentTime);
+                masterGainRef.current.gain.setValueAtTime(v, ctx.currentTime);
+              }
+            }}
             style={{ writingMode: "vertical-lr", direction: "rtl", height: "140px", accentColor: "#8ef59d" }}
           />
           <label style={{ fontSize: "11px", color: "#8ef59d", fontWeight: "700" }}>Vol</label>
