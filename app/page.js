@@ -121,6 +121,21 @@ export default function Home() {
         </p>
       </div>
 
+      {/* Session Timeline */}
+      <div style={{ padding: "0 40px", marginBottom: "40px" }}>
+        <SessionTimeline
+          categoryMap={categoryMap}
+          onPlaySounds={useCallback((names) => {
+            if (names.includes("__binaural__")) oscillatorRef.current?.start();
+            else padGridRef.current?.playPads(names);
+          }, [])}
+          onStopSounds={useCallback((names) => {
+            if (names.includes("__binaural__")) oscillatorRef.current?.stop();
+            else padGridRef.current?.stopPads(names);
+          }, [])}
+        />
+      </div>
+
       {/* Master Control Unit */}
       <div
         style={{
@@ -345,20 +360,6 @@ export default function Home() {
         <PadGrid ref={padGridRef} />
       </div>
 
-      {/* Session Timeline */}
-      <div style={{ padding: "0 40px", marginBottom: "60px" }}>
-        <SessionTimeline
-          categoryMap={categoryMap}
-          onPlaySounds={useCallback((names) => {
-            if (names.includes("__binaural__")) oscillatorRef.current?.start();
-            else padGridRef.current?.playPads(names);
-          }, [])}
-          onStopSounds={useCallback((names) => {
-            if (names.includes("__binaural__")) oscillatorRef.current?.stop();
-            else padGridRef.current?.stopPads(names);
-          }, [])}
-        />
-      </div>
     </main>
   );
 }
