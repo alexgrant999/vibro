@@ -1,8 +1,19 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useCallback } from "react";
 import PadGrid from "./components/PadGrid";
 import OscillatorUnit from "./components/OscillatorUnit";
+import SessionTimeline from "./components/SessionTimeline";
+import { soundFiles } from "./components/sounds";
+
+// Build category map from soundFiles
+const categoryMap = {};
+soundFiles.forEach((s) => {
+  if (!categoryMap[s.category]) categoryMap[s.category] = [];
+  categoryMap[s.category].push(s);
+});
+// Add binaural beats as a special timeline category
+categoryMap["Binaural Beats"] = [{ name: "__binaural__" }];
 
 export default function Home() {
   const padGridRef = useRef(null);
@@ -332,6 +343,21 @@ export default function Home() {
       {/* Pads Grid */}
       <div style={{ padding: "0 40px", marginBottom: "40px" }}>
         <PadGrid ref={padGridRef} />
+      </div>
+
+      {/* Session Timeline */}
+      <div style={{ padding: "0 40px", marginBottom: "60px" }}>
+        <SessionTimeline
+          categoryMap={categoryMap}
+          onPlaySounds={useCallback((names) => {
+            if (names.includes("__binaural__")) oscillatorRef.current?.start();
+            else padGridRef.current?.playPads(names);
+          }, [])}
+          onStopSounds={useCallback((names) => {
+            if (names.includes("__binaural__")) oscillatorRef.current?.stop();
+            else padGridRef.current?.stopPads(names);
+          }, [])}
+        />
       </div>
     </main>
   );

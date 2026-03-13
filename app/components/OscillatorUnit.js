@@ -73,6 +73,7 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
   const mergerRef = useRef(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
+  const isPlayingRef = useRef(false);
   const [volume, setVolume] = useState(0.15);
 
   // Sweep ranges [min, max] — min is the fixed frequency when sweep is off
@@ -103,6 +104,7 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
   const beatDirRef = useRef(1);
   const sweepTickRef = useRef(null);
   const fadeIntervalRef = useRef(null);
+  const intendedVolumeRef = useRef(0.15); // only updated by slider — never by fade tracking
 
   useEffect(() => { carrierRangeRef.current = carrierRange; }, [carrierRange]);
   useEffect(() => { beatRangeRef.current = beatRange; }, [beatRange]);
@@ -172,44 +174,57 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
     }, 100);
   };
 
-  // --- START/STOP HANDLER ---
+  // Cleanup on unmount
   useEffect(() => {
-    if (isPlaying) {
-      const masterGain = ctx.createGain();
-      masterGain.gain.value = 0;
-      masterGain.connect(ctx.destination);
-      masterGain.gain.linearRampToValueAtTime(volume, ctx.currentTime + 10);
-      startFadeTracking(10000);
-
-      const merger = ctx.createChannelMerger(2);
-      merger.connect(masterGain);
-
-      const oscLeft = ctx.createOscillator();
-      const gainLeft = ctx.createGain();
-      oscLeft.type = "sine";
-      oscLeft.frequency.value = carrierRange[0];
-      gainLeft.gain.value = 1;
-      oscLeft.connect(gainLeft).connect(merger, 0, 0);
-      oscLeft.start();
-
-      const oscRight = ctx.createOscillator();
-      const gainRight = ctx.createGain();
-      oscRight.type = "sine";
-      oscRight.frequency.value = carrierRange[0] + beatRange[0];
-      gainRight.gain.value = 1;
-      oscRight.connect(gainRight).connect(merger, 0, 1);
-      oscRight.start();
-
-      oscLeftRef.current = oscLeft;
-      oscRightRef.current = oscRight;
-      masterGainRef.current = masterGain;
-      mergerRef.current = merger;
-    }
-
     return () => {
       [oscLeftRef, oscRightRef].forEach((r) => { try { r.current?.stop(); } catch {} });
+      clearInterval(fadeIntervalRef.current);
     };
-  }, [isPlaying]);
+  }, []);
+
+  const startAudio = () => {
+    const targetVol = intendedVolumeRef.current;
+    const FADE_RATE = 0.1;
+
+    const masterGain = ctx.createGain();
+    masterGain.gain.value = 0;
+    masterGain.connect(ctx.destination);
+    const fadeInDuration = Math.max(targetVol / FADE_RATE, 0.05);
+    masterGain.gain.setValueAtTime(0, ctx.currentTime);
+    masterGain.gain.linearRampToValueAtTime(targetVol, ctx.currentTime + fadeInDuration);
+    startFadeTracking(fadeInDuration * 1000);
+
+    const merger = ctx.createChannelMerger(2);
+    merger.connect(masterGain);
+
+    const cRange = carrierRangeRef.current;
+    const bRange = beatRangeRef.current;
+
+    const oscLeft = ctx.createOscillator();
+    const gainLeft = ctx.createGain();
+    oscLeft.type = "sine";
+    oscLeft.frequency.value = cRange[0];
+    gainLeft.gain.value = 1;
+    oscLeft.connect(gainLeft).connect(merger, 0, 0);
+    oscLeft.start();
+
+    const oscRight = ctx.createOscillator();
+    const gainRight = ctx.createGain();
+    oscRight.type = "sine";
+    oscRight.frequency.value = cRange[0] + bRange[0];
+    gainRight.gain.value = 1;
+    oscRight.connect(gainRight).connect(merger, 0, 1);
+    oscRight.start();
+
+    oscLeftRef.current = oscLeft;
+    oscRightRef.current = oscRight;
+    masterGainRef.current = masterGain;
+    mergerRef.current = merger;
+
+    isPlayingRef.current = true;
+    setIsPlaying(true);
+    setVolume(targetVol); // restore slider to intended volume (may have been dragged to 0 by fade tracking)
+  };
 
   // Volume live update (only when not fading)
   useEffect(() => {
@@ -219,19 +234,31 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
   }, [volume]);
 
   const toggle = () => {
-    if (isPlaying && masterGainRef.current) {
-      // Fade out over 10s then stop
+    if (isPlayingRef.current && masterGainRef.current) {
+      const FADE_RATE = 0.1;
       const gain = masterGainRef.current;
+      const currentGain = gain.gain.value;
+      const fadeOutDuration = currentGain / FADE_RATE;
       gain.gain.cancelScheduledValues(ctx.currentTime);
-      gain.gain.setValueAtTime(gain.gain.value, ctx.currentTime);
-      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 10);
-      startFadeTracking(10000);
+      gain.gain.setValueAtTime(currentGain, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + fadeOutDuration);
+      startFadeTracking(fadeOutDuration * 1000);
+      isPlayingRef.current = false;
+      // Capture current nodes by value so a restart can't be killed by this timeout
+      const leftOsc  = oscLeftRef.current;
+      const rightOsc = oscRightRef.current;
       setTimeout(() => {
-        [oscLeftRef, oscRightRef].forEach((r) => { try { r.current?.stop(); } catch {} });
-      }, 10000);
+        try { leftOsc?.stop();  } catch {}
+        try { rightOsc?.stop(); } catch {}
+      }, fadeOutDuration * 1000);
       setIsPlaying(false);
-    } else {
-      setIsPlaying(true);
+    } else if (!isPlayingRef.current) {
+      // Resume suspended AudioContext (browser policy) then start
+      if (ctx.state === "suspended") {
+        ctx.resume().then(startAudio);
+      } else {
+        startAudio();
+      }
     }
   };
 
@@ -243,10 +270,17 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
       setBeatRange((r) => [params.beatFreq, Math.max(params.beatFreq + 5, r[1])]);
     }
     if (params.volume !== undefined) setVolume(params.volume);
-    if (!isPlaying) setIsPlaying(true);
+    if (!isPlayingRef.current) {
+      if (ctx.state === "suspended") ctx.resume().then(startAudio);
+      else startAudio();
+    }
   };
 
-  useImperativeHandle(ref, () => ({ setParams }));
+  useImperativeHandle(ref, () => ({
+    setParams,
+    start: () => { if (!isPlayingRef.current) toggle(); },
+    stop:  () => { if (isPlayingRef.current)  toggle(); },
+  }));
 
   return (
     <div
@@ -303,6 +337,7 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
               fadeIntervalRef.current = null;
               const v = parseFloat(e.target.value);
               setVolume(v);
+              intendedVolumeRef.current = v;
               if (masterGainRef.current) {
                 masterGainRef.current.gain.cancelScheduledValues(ctx.currentTime);
                 masterGainRef.current.gain.setValueAtTime(v, ctx.currentTime);

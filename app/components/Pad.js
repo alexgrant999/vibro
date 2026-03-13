@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { getAudioContext } from "./audioContext";
 
-export default function Pad({ name, url, listView = false }) {
+export default function Pad({ name, url, listView = false, analyserNode = null }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(0.4);
   const [loop, setLoop] = useState(true);
@@ -22,7 +22,41 @@ export default function Pad({ name, url, listView = false }) {
   const intervalRef = useRef(null);
   const fadeIntervalRef = useRef(null);
   const targetVolumeRef = useRef(0.4);
+  const loopControllerRef = useRef(null);
   const canvasRef = useRef(null);
+
+  const startCrossfadeLoop = (ctx, buffer, filter, fromOffset = 0) => {
+    const XFADE = 2;
+    let active = true;
+    const allSources = [];
+
+    const scheduleSource = (startAt, offset) => {
+      if (!active) return;
+      const src = ctx.createBufferSource();
+      const xg = ctx.createGain();
+      src.buffer = buffer;
+      const playDuration = buffer.duration - offset;
+
+      xg.gain.setValueAtTime(0, startAt);
+      xg.gain.linearRampToValueAtTime(1, startAt + Math.min(XFADE, playDuration / 2));
+      const fadeOutStart = startAt + playDuration - XFADE;
+      if (fadeOutStart > startAt + XFADE) xg.gain.setValueAtTime(1, fadeOutStart);
+      xg.gain.linearRampToValueAtTime(0, startAt + playDuration);
+
+      src.connect(xg);
+      xg.connect(filter);
+      src.start(startAt, offset);
+      allSources.push(src);
+      sourceRef.current = src;
+
+      const nextAt = startAt + playDuration - XFADE;
+      const delay = (nextAt - ctx.currentTime) * 1000 - 100;
+      setTimeout(() => { if (active) scheduleSource(nextAt, 0); }, Math.max(0, delay));
+    };
+
+    scheduleSource(ctx.currentTime, fromOffset);
+    return { stop: () => { active = false; allSources.forEach(s => { try { s.stop(); } catch {} }); } };
+  };
 
   const startFadeTracking = (durationMs) => {
     clearInterval(fadeIntervalRef.current);
@@ -39,40 +73,15 @@ export default function Pad({ name, url, listView = false }) {
   };
 
   // -------- PLAYBACK --------
-  const handleTogglePlay = async () => {
-    const ctx = getAudioContext();
-
-    // Ensure the audio context is resumed (required for user gesture)
-    if (ctx.state === "suspended") await ctx.resume();
-
-    // --- STOP if already playing ---
-    if (isPlaying && sourceRef.current) {
-      // Fade out over 10 seconds then stop
-      if (gainNodeRef.current) {
-        gainNodeRef.current.gain.cancelScheduledValues(ctx.currentTime);
-        gainNodeRef.current.gain.setValueAtTime(gainNodeRef.current.gain.value, ctx.currentTime);
-        gainNodeRef.current.gain.linearRampToValueAtTime(0, ctx.currentTime + 10);
-        startFadeTracking(10000);
-      }
-      const src = sourceRef.current;
-      setTimeout(() => {
-        try { src.stop(); } catch (_) {}
-      }, 10000);
-      pausedAtRef.current = ctx.currentTime - startTimeRef.current;
-      clearInterval(intervalRef.current);
-      setIsPlaying(false);
-      return;
-    }
-
-    setIsPlaying(true); // show "Stop" immediately
-
+  const startPlayback = async (ctx, skipFade = false) => {
     // --- SETUP NODES ---
     if (!gainNodeRef.current) {
       const gain = ctx.createGain();
-      gain.gain.value = 0;
+      gain.gain.value = skipFade ? volume : 0;
       gain.connect(ctx.destination);
+      if (analyserNode) gain.connect(analyserNode);
       gainNodeRef.current = gain;
-    } else {
+    } else if (!skipFade) {
       gainNodeRef.current.gain.cancelScheduledValues(ctx.currentTime);
       gainNodeRef.current.gain.setValueAtTime(0, ctx.currentTime);
     }
@@ -83,63 +92,101 @@ export default function Pad({ name, url, listView = false }) {
     filter.frequency.value = lowPassEnabled ? lowPassFreq : 22050;
     filterRef.current = filter;
 
-    try {
-      // --- LOAD AND DECODE ---
-      if (!bufferRef.current) {
-        const response = await fetch(url);
-        const arrayBuffer = await response.arrayBuffer();
-        bufferRef.current = await ctx.decodeAudioData(arrayBuffer);
-      }
+    // --- LOAD AND DECODE ---
+    if (!bufferRef.current) {
+      const response = await fetch(url);
+      const arrayBuffer = await response.arrayBuffer();
+      bufferRef.current = await ctx.decodeAudioData(arrayBuffer);
+    }
 
-      const buffer = bufferRef.current;
-      setDuration(buffer.duration);
+    const buffer = bufferRef.current;
+    setDuration(buffer.duration);
 
-      // --- CREATE SOURCE ---
+    filter.connect(gainNodeRef.current);
+
+    // --- START PLAYBACK ---
+    const offset = pausedAtRef.current;
+    startTimeRef.current = ctx.currentTime - offset;
+
+    if (loop) {
+      loopControllerRef.current = startCrossfadeLoop(ctx, buffer, filter, offset);
+    } else {
       const source = ctx.createBufferSource();
       source.buffer = buffer;
-      source.loop = loop;
       source.connect(filter);
-      filter.connect(gainNodeRef.current);
       sourceRef.current = source;
-
-      // --- START PLAYBACK ---
-      const offset = pausedAtRef.current;
-      startTimeRef.current = ctx.currentTime - offset;
       source.start(0, offset);
+    }
 
-      // Fade in over 10 seconds
+    if (!skipFade) {
       targetVolumeRef.current = volume;
-      gainNodeRef.current.gain.linearRampToValueAtTime(volume, ctx.currentTime + 10);
-      startFadeTracking(10000);
+      const FADE_RATE = 0.1; // gain units per second (0→1 in 10s)
+      const fadeInDuration = volume / FADE_RATE;
+      gainNodeRef.current.gain.linearRampToValueAtTime(volume, ctx.currentTime + fadeInDuration);
+      startFadeTracking(fadeInDuration * 1000);
+    }
 
-      // --- TIMELINE SYNC ---
-      clearInterval(intervalRef.current);
-      intervalRef.current = setInterval(() => {
-        const elapsed = ctx.currentTime - startTimeRef.current;
-        const position = loop
-          ? elapsed % buffer.duration
-          : Math.min(elapsed, buffer.duration);
-
-        setCurrentTime(position);
-
-        // Auto-stop if finished and not looping
-        if (!loop && position >= buffer.duration) {
-          clearInterval(intervalRef.current);
-          setIsPlaying(false);
-          pausedAtRef.current = 0;
-          setCurrentTime(0);
-        }
-      }, 100);
-
-      // --- HANDLE END EVENT ---
-      source.onended = () => {
+    // --- TIMELINE SYNC ---
+    clearInterval(intervalRef.current);
+    intervalRef.current = setInterval(() => {
+      const elapsed = ctx.currentTime - startTimeRef.current;
+      const position = loop
+        ? elapsed % buffer.duration
+        : Math.min(elapsed, buffer.duration);
+      setCurrentTime(position);
+      if (!loop && position >= buffer.duration) {
         clearInterval(intervalRef.current);
-        if (!loop) {
-          setIsPlaying(false);
-          pausedAtRef.current = 0;
-          setCurrentTime(0);
-        }
+        setIsPlaying(false);
+        pausedAtRef.current = 0;
+        setCurrentTime(0);
+      }
+    }, 100);
+
+    // --- HANDLE END EVENT (non-loop only) ---
+    if (!loop && sourceRef.current) {
+      sourceRef.current.onended = () => {
+        clearInterval(intervalRef.current);
+        setIsPlaying(false);
+        pausedAtRef.current = 0;
+        setCurrentTime(0);
       };
+    }
+  };
+
+  const handleTogglePlay = async () => {
+    const ctx = getAudioContext();
+
+    // Ensure the audio context is resumed (required for user gesture)
+    if (ctx.state === "suspended") await ctx.resume();
+
+    // --- STOP if already playing ---
+    if (isPlaying) {
+      const FADE_RATE = 0.1;
+      const currentGain = gainNodeRef.current ? gainNodeRef.current.gain.value : 0;
+      const fadeOutDuration = currentGain / FADE_RATE;
+      if (gainNodeRef.current) {
+        gainNodeRef.current.gain.cancelScheduledValues(ctx.currentTime);
+        gainNodeRef.current.gain.setValueAtTime(currentGain, ctx.currentTime);
+        gainNodeRef.current.gain.linearRampToValueAtTime(0, ctx.currentTime + fadeOutDuration);
+        startFadeTracking(fadeOutDuration * 1000);
+      }
+      const ctrl = loopControllerRef.current;
+      const src = sourceRef.current;
+      setTimeout(() => {
+        if (ctrl) ctrl.stop();
+        else { try { src?.stop(); } catch (_) {} }
+        loopControllerRef.current = null;
+      }, fadeOutDuration * 1000);
+      pausedAtRef.current = ctx.currentTime - startTimeRef.current;
+      clearInterval(intervalRef.current);
+      setIsPlaying(false);
+      return;
+    }
+
+    setIsPlaying(true);
+
+    try {
+      await startPlayback(ctx, false);
     } catch (err) {
       console.error("Playback error:", err);
       setIsPlaying(false);
@@ -160,29 +207,27 @@ export default function Pad({ name, url, listView = false }) {
     }
   };
 
-  // Revised handleScrub function
   const handleScrub = async (e) => {
     const newTime = parseFloat(e.target.value);
     const wasPlaying = isPlaying;
+    const ctx = getAudioContext();
 
-    // 1. If currently playing, stop it and clear the interval
-    if (sourceRef.current) {
-      try {
-        sourceRef.current.stop();
-      } catch (_) {}
-      clearInterval(intervalRef.current);
+    // Stop current playback without touching gain
+    if (loopControllerRef.current) {
+      loopControllerRef.current.stop();
+      loopControllerRef.current = null;
+    } else if (sourceRef.current) {
+      try { sourceRef.current.stop(); } catch (_) {}
       sourceRef.current = null;
     }
+    clearInterval(intervalRef.current);
 
-    // 2. Set the new scrub position and update state
     pausedAtRef.current = newTime;
     setCurrentTime(newTime);
 
-    // 3. If it was playing before, restart playback from the new point
     if (wasPlaying) {
-      // This will start playback and correctly set startTimeRef.current
-      // handleTogglePlay already uses pausedAtRef.current
-      await handleTogglePlay();
+      // Restart from new position without resetting volume
+      await startPlayback(ctx, true);
     }
   };
 
@@ -231,7 +276,8 @@ export default function Pad({ name, url, listView = false }) {
     return () => {
       clearInterval(intervalRef.current);
       clearInterval(fadeIntervalRef.current);
-      if (sourceRef.current) sourceRef.current.stop();
+      if (loopControllerRef.current) loopControllerRef.current.stop();
+      else { try { sourceRef.current?.stop(); } catch {} }
     };
   }, []);
 
