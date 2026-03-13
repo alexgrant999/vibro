@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { getAudioContext } from "./audioContext";
+import { getAudioContext, unlockAudioContext } from "./audioContext";
 
 export default function Pad({ name, url, listView = false, analyserNode = null }) {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -12,7 +12,6 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
 
-  const ctx = getAudioContext();
   const sourceRef = useRef(null);
   const gainNodeRef = useRef(null);
   const filterRef = useRef(null);
@@ -154,10 +153,8 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
   };
 
   const handleTogglePlay = async () => {
-    const ctx = getAudioContext();
-
-    // Ensure the audio context is resumed (required for user gesture)
-    if (ctx.state === "suspended") await ctx.resume();
+    // Unlock and resume audio context inside the user gesture (required for iOS Safari)
+    const ctx = await unlockAudioContext();
 
     // --- STOP if already playing ---
     if (isPlaying) {

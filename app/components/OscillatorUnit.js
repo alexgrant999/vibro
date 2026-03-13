@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useImperativeHandle } from "react";
-import { getAudioContext } from "./audioContext";
+import { getAudioContext, unlockAudioContext } from "./audioContext";
 import { forwardRef } from "react";
 
 const DualRange = ({ min, max, step, value, onChange, color }) => {
@@ -66,7 +66,6 @@ const Switch = ({ label, active, onChange }) => (
 );
 
 const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, ref) {
-  const ctx = getAudioContext();
   const oscLeftRef = useRef(null);
   const oscRightRef = useRef(null);
   const masterGainRef = useRef(null);
@@ -183,33 +182,34 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
   }, []);
 
   const startAudio = () => {
+    const actx = getAudioContext();
     const targetVol = intendedVolumeRef.current;
     const FADE_RATE = 0.1;
 
-    const masterGain = ctx.createGain();
+    const masterGain = actx.createGain();
     masterGain.gain.value = 0;
-    masterGain.connect(ctx.destination);
+    masterGain.connect(actx.destination);
     const fadeInDuration = Math.max(targetVol / FADE_RATE, 0.05);
-    masterGain.gain.setValueAtTime(0, ctx.currentTime);
-    masterGain.gain.linearRampToValueAtTime(targetVol, ctx.currentTime + fadeInDuration);
+    masterGain.gain.setValueAtTime(0, actx.currentTime);
+    masterGain.gain.linearRampToValueAtTime(targetVol, actx.currentTime + fadeInDuration);
     startFadeTracking(fadeInDuration * 1000);
 
-    const merger = ctx.createChannelMerger(2);
+    const merger = actx.createChannelMerger(2);
     merger.connect(masterGain);
 
     const cRange = carrierRangeRef.current;
     const bRange = beatRangeRef.current;
 
-    const oscLeft = ctx.createOscillator();
-    const gainLeft = ctx.createGain();
+    const oscLeft = actx.createOscillator();
+    const gainLeft = actx.createGain();
     oscLeft.type = "sine";
     oscLeft.frequency.value = cRange[0];
     gainLeft.gain.value = 1;
     oscLeft.connect(gainLeft).connect(merger, 0, 0);
     oscLeft.start();
 
-    const oscRight = ctx.createOscillator();
-    const gainRight = ctx.createGain();
+    const oscRight = actx.createOscillator();
+    const gainRight = actx.createGain();
     oscRight.type = "sine";
     oscRight.frequency.value = cRange[0] + bRange[0];
     gainRight.gain.value = 1;
@@ -239,9 +239,9 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
       const gain = masterGainRef.current;
       const currentGain = gain.gain.value;
       const fadeOutDuration = currentGain / FADE_RATE;
-      gain.gain.cancelScheduledValues(ctx.currentTime);
-      gain.gain.setValueAtTime(currentGain, ctx.currentTime);
-      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + fadeOutDuration);
+      gain.gain.cancelScheduledValues(getAudioContext().currentTime);
+      gain.gain.setValueAtTime(currentGain, getAudioContext().currentTime);
+      gain.gain.linearRampToValueAtTime(0, getAudioContext().currentTime + fadeOutDuration);
       startFadeTracking(fadeOutDuration * 1000);
       isPlayingRef.current = false;
       // Capture current nodes by value so a restart can't be killed by this timeout
@@ -253,12 +253,8 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
       }, fadeOutDuration * 1000);
       setIsPlaying(false);
     } else if (!isPlayingRef.current) {
-      // Resume suspended AudioContext (browser policy) then start
-      if (ctx.state === "suspended") {
-        ctx.resume().then(startAudio);
-      } else {
-        startAudio();
-      }
+      // Unlock audio context (required for iOS Safari) then start
+      unlockAudioContext().then(startAudio);
     }
   };
 
@@ -271,8 +267,7 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
     }
     if (params.volume !== undefined) setVolume(params.volume);
     if (!isPlayingRef.current) {
-      if (ctx.state === "suspended") ctx.resume().then(startAudio);
-      else startAudio();
+      unlockAudioContext().then(startAudio);
     }
   };
 
@@ -339,8 +334,8 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
               setVolume(v);
               intendedVolumeRef.current = v;
               if (masterGainRef.current) {
-                masterGainRef.current.gain.cancelScheduledValues(ctx.currentTime);
-                masterGainRef.current.gain.setValueAtTime(v, ctx.currentTime);
+                masterGainRef.current.gain.cancelScheduledValues(getAudioContext().currentTime);
+                masterGainRef.current.gain.setValueAtTime(v, getAudioContext().currentTime);
               }
             }}
             style={{ writingMode: "vertical-lr", direction: "rtl", height: "140px", accentColor: "#8ef59d" }}
