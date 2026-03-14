@@ -55,3 +55,12 @@ button:hover {
 input[type="range"] {
   width: 80%;
 }
+
+.desktop-only {
+  display: block;
+}
+@media (max-width: 768px) {
+  .desktop-only {
+    display: none;
+  }
+}

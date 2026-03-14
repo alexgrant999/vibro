@@ -121,8 +121,8 @@ export default function Home() {
         </p>
       </div>
 
-      {/* Session Timeline */}
-      <div style={{ padding: "0 40px", marginBottom: "40px" }}>
+      {/* Session Timeline — desktop only (iOS audio policy blocks programmatic playback) */}
+      <div className="desktop-only" style={{ padding: "0 40px", marginBottom: "40px" }}>
         <SessionTimeline
           categoryMap={categoryMap}
           onPlaySounds={useCallback((names) => {
