@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { unlockAudioContext } from "./audioContext";
 
 const DURATION   = 600; // 10 min in seconds
 const ROWS       = 5;
@@ -44,6 +45,7 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
   const [currentTime, setCurrentTime] = useState(0);
   const [placedItems, setPlacedItems] = useState([]);
   const [nextId,      setNextId]      = useState(1);
+  const nextIdRef = useRef(1);
   const [dragOver,    setDragOver]    = useState(false);
   const [showHelp,    setShowHelp]    = useState(false);
   const [isTouch,     setIsTouch]     = useState(false);
@@ -127,12 +129,15 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
   }, [isRunning, tick]);
 
   // ── Controls ──────────────────────────────────────────────────────────────
-  const handlePlayPause = () => {
+  const handlePlayPause = async () => {
     if (isRunning) {
       offsetRef.current = (performance.now() - startEpochRef.current) / 1000 % DURATION + offsetRef.current;
       offsetRef.current = offsetRef.current % DURATION;
       setIsRunning(false);
     } else {
+      // Unlock the AudioContext inside this real user gesture so that
+      // the programmatic btn.click() calls from the RAF tick will work on iOS
+      await unlockAudioContext();
       setIsRunning(true);
     }
   };
@@ -249,8 +254,9 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
     const rect = timelineRef.current.getBoundingClientRect();
     const time = pxToTime(e.clientX - rect.left);
     const row  = clientYToRow(e.clientY);
-    setPlacedItems((prev) => [...prev, { id: nextId, category: cat, time, duration: 60, row }]);
-    setNextId((n) => n + 1);
+    setPlacedItems((prev) => [...prev, { id: nextIdRef.current, category: cat, time, duration: 60, row }]);
+    nextIdRef.current += 1;
+    setNextId(nextIdRef.current);
     paletteDragRef.current = null;
   };
 
@@ -282,9 +288,10 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
         const row  = clientYToRow(touch.clientY);
         setPlacedItems((prev) => [
           ...prev,
-          { id: nextId, category: paletteTouchCatRef.current, time, duration: 120, row },
+          { id: nextIdRef.current, category: paletteTouchCatRef.current, time, duration: 120, row },
         ]);
-        setNextId((n) => n + 1);
+        nextIdRef.current += 1;
+        setNextId(nextIdRef.current);
       }
       paletteTouchCatRef.current = null;
       setPaletteDragging(null);
@@ -296,7 +303,7 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
       document.removeEventListener("touchmove", handleDocTouchMove);
       document.removeEventListener("touchend",  handleDocTouchEnd);
     };
-  }, [nextId, pxToTime, clientYToRow]);
+  }, [pxToTime, clientYToRow]); // no nextId dep — use nextIdRef to avoid re-registering listeners
 
   const onPaletteTouchStart = (e, cat) => {
     paletteTouchCatRef.current = cat;
@@ -329,7 +336,6 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
       color: "white",
       userSelect: "none",
       WebkitUserSelect: "none",
-      touchAction: "none",
     }}>
 
       {/* Header row */}
