@@ -11,6 +11,7 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
   const [lowPassFreq, setLowPassFreq] = useState(5000); // Hz
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [error, setError] = useState(null);
 
   const sourceRef = useRef(null);
   const gainNodeRef = useRef(null);
@@ -95,8 +96,15 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
     if (!bufferRef.current) {
       const response = await fetch(url);
       const arrayBuffer = await response.arrayBuffer();
-      bufferRef.current = await ctx.decodeAudioData(arrayBuffer);
+      // Use callback-style decodeAudioData for iOS Safari compatibility
+      // (Promise-based API silently fails on some iOS versions)
+      bufferRef.current = await new Promise((resolve, reject) => {
+        ctx.decodeAudioData(arrayBuffer, resolve, reject);
+      });
     }
+
+    // Re-resume context here in case iOS suspended it during the async fetch
+    if (ctx.state === "suspended") await ctx.resume();
 
     const buffer = bufferRef.current;
     setDuration(buffer.duration);
@@ -181,11 +189,13 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
     }
 
     setIsPlaying(true);
+    setError(null);
 
     try {
       await startPlayback(ctx, false);
     } catch (err) {
       console.error("Playback error:", err);
+      setError(err.message || "Audio failed");
       setIsPlaying(false);
       clearInterval(intervalRef.current);
     }
@@ -285,10 +295,13 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
     return (
       <div
         style={{
+          position: "relative",
           background: isPlaying
             ? "linear-gradient(180deg, #1a3a42, #0f2530)"
+            : error
+            ? "linear-gradient(180deg, #2a1a1a, #1a0f0f)"
             : "linear-gradient(180deg, #121922, #0c121a)",
-          border: isPlaying ? "1.5px solid #6ccff6" : "1px solid #233142",
+          border: isPlaying ? "1.5px solid #6ccff6" : error ? "1px solid #8a3a3a" : "1px solid #233142",
           borderRadius: "12px",
           padding: "12px 16px",
           display: "flex",
@@ -299,6 +312,13 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
           minHeight: "44px",
         }}
       >
+        {/* Error */}
+        {error && (
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0, background: "#5a1a1a", color: "#ff9999", fontSize: "11px", padding: "3px 8px", borderRadius: "12px 12px 0 0", textAlign: "center" }}>
+            ⚠ {error}
+          </div>
+        )}
+
         {/* Name */}
         <div
           style={{

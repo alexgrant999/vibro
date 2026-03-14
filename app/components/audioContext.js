@@ -27,17 +27,17 @@ export function getAudioContext() {
 /**
  * Must be called inside a user-gesture handler (click/touchend).
  * Resumes the context AND plays a silent buffer to unlock iOS Safari audio.
+ *
+ * Calls ctx.resume() synchronously (no await) so the gesture context is not
+ * lost, then immediately plays a 1-sample silent buffer — the minimum required
+ * to unlock iOS audio. Returns a Promise that resolves once the context is running.
  */
-export async function unlockAudioContext() {
+export function unlockAudioContext() {
   const ctx = getAudioContext();
-  if (ctx === SSR_MOCK) return ctx;
+  if (ctx === SSR_MOCK) return Promise.resolve(ctx);
 
-  if (ctx.state === "suspended") {
-    await ctx.resume();
-  }
-
+  // Play silent buffer synchronously within the gesture — this is what iOS needs
   if (!_unlocked) {
-    // iOS requires at least one buffer to be played inside a gesture to unlock audio
     const buf = ctx.createBuffer(1, 1, ctx.sampleRate);
     const src = ctx.createBufferSource();
     src.buffer = buf;
@@ -46,5 +46,11 @@ export async function unlockAudioContext() {
     _unlocked = true;
   }
 
-  return ctx;
+  // resume() is called after the silent buffer (still within the gesture stack)
+  // and returns a Promise we can await in the caller
+  if (ctx.state === "suspended") {
+    return ctx.resume().then(() => ctx);
+  }
+
+  return Promise.resolve(ctx);
 }
