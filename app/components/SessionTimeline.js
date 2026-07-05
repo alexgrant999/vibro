@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { unlockAudioContext } from "./audioContext";
+import { timelinePresets } from "./timelinePresets";
 
 const DURATION   = 600; // 10 min in seconds
 const ROWS       = 5;
@@ -40,11 +41,12 @@ function fmt(s) {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 }
 
-export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSounds }) {
+export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSounds, onApplyOscillator }) {
   const [isRunning,   setIsRunning]   = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [placedItems, setPlacedItems] = useState([]);
   const [nextId,      setNextId]      = useState(1);
+  const [activePreset, setActivePreset] = useState(null);
   const nextIdRef = useRef(1);
   const [dragOver,    setDragOver]    = useState(false);
   const [showHelp,    setShowHelp]    = useState(false);
@@ -148,6 +150,15 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
     prevTimeRef.current = 0;
     activeSounds.current.clear();
     setCurrentTime(0);
+  };
+
+  const loadPreset = (preset) => {
+    const items = preset.items.map((it, i) => ({ ...it, id: nextIdRef.current + i }));
+    nextIdRef.current += preset.items.length;
+    setNextId(nextIdRef.current);
+    setPlacedItems(items);
+    setActivePreset(preset);
+    if (preset.oscillator) onApplyOscillator?.(preset.oscillator);
   };
 
   // ── Time ↔ pixel helpers ──────────────────────────────────────────────────
@@ -257,6 +268,7 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
     setPlacedItems((prev) => [...prev, { id: nextIdRef.current, category: cat, time, duration: 60, row }]);
     nextIdRef.current += 1;
     setNextId(nextIdRef.current);
+    setActivePreset(null);
     paletteDragRef.current = null;
   };
 
@@ -292,6 +304,7 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
         ]);
         nextIdRef.current += 1;
         setNextId(nextIdRef.current);
+        setActivePreset(null);
       }
       paletteTouchCatRef.current = null;
       setPaletteDragging(null);
@@ -316,6 +329,7 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
   const removeItem = (e, id) => {
     e.stopPropagation();
     setPlacedItems((prev) => prev.filter((item) => item.id !== id));
+    setActivePreset(null);
     if (activeSounds.current.has(id)) {
       onStopSounds(activeSounds.current.get(id));
       activeSounds.current.delete(id);
@@ -424,6 +438,43 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
           </div>
         </div>
       )}
+
+      {/* Session presets */}
+      <div style={{ marginBottom: "14px" }}>
+        <div style={{ fontSize: "11px", color: "#7b8aa0", marginBottom: "7px" }}>
+          Presets · load an arrangement, then press ▶ Play
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+          {timelinePresets.map((p) => {
+            const active = activePreset?.name === p.name;
+            return (
+              <button
+                key={p.name}
+                onClick={() => loadPreset(p)}
+                title={p.description}
+                style={{
+                  background: active ? "rgba(142,245,157,0.12)" : "linear-gradient(180deg,#1a2431,#0e1a24)",
+                  border: active ? "1px solid #8ef59d" : "1px solid #334252",
+                  borderRadius: "8px",
+                  color: active ? "#8ef59d" : "#c1c9d6",
+                  padding: "7px 12px",
+                  cursor: "pointer",
+                  fontSize: "12px",
+                  fontWeight: "600",
+                  WebkitTapHighlightColor: "transparent",
+                }}
+              >
+                {p.icon} {p.name}
+              </button>
+            );
+          })}
+        </div>
+        {activePreset && (
+          <div style={{ fontSize: "11px", color: "#9db1c5", marginTop: "7px", lineHeight: 1.5 }}>
+            {activePreset.icon} {activePreset.description}
+          </div>
+        )}
+      </div>
 
       {/* Palette */}
       <div style={{ marginBottom: "12px" }}>

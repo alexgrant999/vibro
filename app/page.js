@@ -133,6 +133,9 @@ export default function Home() {
             if (names.includes("__binaural__")) oscillatorRef.current?.stop();
             else padGridRef.current?.stopPads(names);
           }, [])}
+          onApplyOscillator={useCallback((params) => {
+            oscillatorRef.current?.setParams(params, { autoStart: false });
+          }, [])}
         />
       </div>
 

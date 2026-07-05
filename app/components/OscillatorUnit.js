@@ -258,15 +258,15 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
     }
   };
 
-  const setParams = (params) => {
+  const setParams = (params, { autoStart = true } = {}) => {
     if (params.carrierFreq !== undefined) {
-      setCarrierRange((r) => [params.carrierFreq, Math.max(params.carrierFreq + 10, r[1])]);
+      setCarrierRange((r) => [params.carrierFreq, params.carrierMax ?? Math.max(params.carrierFreq + 10, r[1])]);
     }
     if (params.beatFreq !== undefined) {
-      setBeatRange((r) => [params.beatFreq, Math.max(params.beatFreq + 5, r[1])]);
+      setBeatRange((r) => [params.beatFreq, params.beatMax ?? Math.max(params.beatFreq + 5, r[1])]);
     }
     if (params.volume !== undefined) setVolume(params.volume);
-    if (!isPlayingRef.current) {
+    if (autoStart && !isPlayingRef.current) {
       unlockAudioContext().then(startAudio);
     }
   };
