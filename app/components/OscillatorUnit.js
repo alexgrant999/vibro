@@ -4,6 +4,8 @@ import React, { useState, useEffect, useRef, useImperativeHandle } from "react";
 import { getAudioContext, unlockAudioContext } from "./audioContext";
 import { forwardRef } from "react";
 
+const FADE_RATE = 0.1; // gain units per second, shared by fade-in, fade-out and preset glides
+
 const DualRange = ({ min, max, step, value, onChange, color }) => {
   const [lo, hi] = value;
   const btnStyle = {
@@ -65,7 +67,7 @@ const Switch = ({ label, active, onChange }) => (
   </button>
 );
 
-const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, ref) {
+const OscillatorUnit = forwardRef(function OscillatorUnit(_props, ref) {
   const oscLeftRef = useRef(null);
   const oscRightRef = useRef(null);
   const masterGainRef = useRef(null);
@@ -75,7 +77,7 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
   const isPlayingRef = useRef(false);
   const [volume, setVolume] = useState(0.15);
 
-  // Sweep ranges [min, max] — min is the fixed frequency when sweep is off
+  // Sweep ranges [min, max]. min is the fixed frequency when sweep is off
   const [carrierRange, setCarrierRange] = useState([40, 140]);
   const [beatRange, setBeatRange] = useState([4, 8]);
 
@@ -103,7 +105,7 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
   const beatDirRef = useRef(1);
   const sweepTickRef = useRef(null);
   const fadeIntervalRef = useRef(null);
-  const intendedVolumeRef = useRef(0.15); // only updated by slider — never by fade tracking
+  const intendedVolumeRef = useRef(0.15); // only updated by the slider and setParams, never by fade tracking
 
   useEffect(() => { carrierRangeRef.current = carrierRange; }, [carrierRange]);
   useEffect(() => { beatRangeRef.current = beatRange; }, [beatRange]);
@@ -169,7 +171,10 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
     const end = Date.now() + durationMs;
     fadeIntervalRef.current = setInterval(() => {
       if (masterGainRef.current) setVolume(masterGainRef.current.gain.value);
-      if (Date.now() >= end) clearInterval(fadeIntervalRef.current);
+      if (Date.now() >= end) {
+        clearInterval(fadeIntervalRef.current);
+        fadeIntervalRef.current = null;
+      }
     }, 100);
   };
 
@@ -184,7 +189,6 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
   const startAudio = () => {
     const actx = getAudioContext();
     const targetVol = intendedVolumeRef.current;
-    const FADE_RATE = 0.1;
 
     const masterGain = actx.createGain();
     masterGain.gain.value = 0;
@@ -226,16 +230,8 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
     setVolume(targetVol); // restore slider to intended volume (may have been dragged to 0 by fade tracking)
   };
 
-  // Volume live update (only when not fading)
-  useEffect(() => {
-    if (masterGainRef.current && !fadeIntervalRef.current) {
-      masterGainRef.current.gain.value = volume;
-    }
-  }, [volume]);
-
   const toggle = () => {
     if (isPlayingRef.current && masterGainRef.current) {
-      const FADE_RATE = 0.1;
       const gain = masterGainRef.current;
       const currentGain = gain.gain.value;
       const fadeOutDuration = currentGain / FADE_RATE;
@@ -265,7 +261,23 @@ const OscillatorUnit = forwardRef(function OscillatorUnit({ id, initialFreq }, r
     if (params.beatFreq !== undefined) {
       setBeatRange((r) => [params.beatFreq, params.beatMax ?? Math.max(params.beatFreq + 5, r[1])]);
     }
-    if (params.volume !== undefined) setVolume(params.volume);
+    if (params.volume !== undefined) {
+      const v = Math.max(0, Math.min(1, params.volume));
+      intendedVolumeRef.current = v;
+      if (isPlayingRef.current && masterGainRef.current) {
+        // Glide to the new level at the fade rate; fade tracking carries the slider along
+        const g   = masterGainRef.current.gain;
+        const now = getAudioContext().currentTime;
+        const cur = g.value;
+        const dur = Math.max(Math.abs(v - cur) / FADE_RATE, 0.05);
+        g.cancelScheduledValues(now);
+        g.setValueAtTime(cur, now);
+        g.linearRampToValueAtTime(v, now + dur);
+        startFadeTracking(dur * 1000);
+      } else {
+        setVolume(v);
+      }
+    }
     if (autoStart && !isPlayingRef.current) {
       unlockAudioContext().then(startAudio);
     }
