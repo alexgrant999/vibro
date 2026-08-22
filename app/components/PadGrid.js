@@ -4,6 +4,7 @@ import React, { useState, useImperativeHandle, forwardRef, useRef, useEffect } f
 import Pad from "./Pad";
 import { baseUrl, soundFiles } from "./sounds";
 import { getAudioContext } from "./audioContext";
+import { padRegistry } from "./padRegistry";
 
 const CATEGORY_ICONS = {
   "Chakra Bowls": "🌈",
@@ -38,7 +39,7 @@ function FreqGraph({ analyserNode }) {
       c.fillStyle = "#0a1219";
       c.fillRect(0, 0, W, H);
 
-      // RMS amplitude — time-domain data is centered at 128
+      // RMS amplitude; time-domain data is centered at 128
       let sum = 0;
       for (let i = 0; i < bufLen; i++) {
         const s = (data[i] - 128) / 128;
@@ -72,8 +73,7 @@ function FreqGraph({ analyserNode }) {
   );
 }
 
-const PadGridComponent = forwardRef(function PadGrid(_props, ref) {
-  const [oscillator, setOscillator] = useState({ id: 1, initialFreq: null }); // eslint-disable-line no-unused-vars
+const PadGridComponent = forwardRef(function PadGrid({ onStopAll }, ref) {
   const [viewMode, setViewMode] = useState("list");
   const [collapsedCategories, setCollapsedCategories] = useState({});
   const analysersRef = useRef({});
@@ -106,55 +106,12 @@ const PadGridComponent = forwardRef(function PadGrid(_props, ref) {
   const toggleCategory = (cat) =>
     setCollapsedCategories((prev) => ({ ...prev, [cat]: !prev[cat] }));
 
-  const setOscillatorFreq = (freq) => {
-    setOscillator({ id: 1, initialFreq: freq });
-  };
-
-  const setOscillatorParams = (params) => {
-    // This will be called by the ref
-    if (oscillatorRef.current) {
-      oscillatorRef.current.setParams(params);
-    }
-  };
-
-  const stopAll = () => {
-    const buttons = document.querySelectorAll('[data-stop-button]');
-    buttons.forEach((btn) => {
-      if (btn.textContent.includes('⏹')) {
-        btn.click();
-      }
-    });
-  };
-
-  const stopPads = (padNames) => {
-    const buttons = document.querySelectorAll('[data-stop-button]');
-    buttons.forEach((btn) => {
-      const btnName = btn.getAttribute('data-pad-name');
-      if (padNames.includes(btnName) && btn.textContent.includes('⏹')) {
-        btn.click();
-      }
-    });
-  };
-
-  const playPads = (padNames) => {
-    // Play specific pads by name
-    const buttons = document.querySelectorAll('[data-pad-name]');
-    buttons.forEach((btn) => {
-      const btnName = btn.getAttribute('data-pad-name');
-      if (padNames.includes(btnName)) {
-        // Only click if not already playing (button text doesn't contain "Stop")
-        if (!btn.textContent.includes('⏹')) {
-          btn.click();
-        }
-      }
-    });
-  };
-
-  const oscillatorRef = useRef(null);
+  // Pads are addressed by exact display name (see sounds.js); play/stop are idempotent
+  const stopAll = () => padRegistry.forEach((pad) => pad.stop());
+  const stopPads = (padNames) => padNames.forEach((n) => padRegistry.get(n)?.stop());
+  const playPads = (padNames) => padNames.forEach((n) => padRegistry.get(n)?.play());
 
   useImperativeHandle(ref, () => ({
-    addOscillatorWithFreq: setOscillatorFreq,
-    setOscillatorParams,
     playPads,
     stopPads,
     stopAll,
@@ -204,7 +161,7 @@ const PadGridComponent = forwardRef(function PadGrid(_props, ref) {
           📊 Grid View
         </button>
         <button
-          onClick={stopAll}
+          onClick={() => { onStopAll?.(); stopAll(); }}
           style={{
             background: "linear-gradient(180deg, #3a1717, #2a0f0f)",
             border: "1px solid #8a4a4a",

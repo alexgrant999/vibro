@@ -2,9 +2,14 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { getAudioContext, unlockAudioContext } from "./audioContext";
+import { padRegistry } from "./padRegistry";
+
+const FADE_RATE = 0.1; // gain units per second (0 to 1 in 10 s)
 
 export default function Pad({ name, url, listView = false, analyserNode = null }) {
   const [isPlaying, setIsPlaying] = useState(false);
+  const isPlayingRef = useRef(false); // decided synchronously so two clicks before a re-render cannot both start or both stop
+  const playTokenRef = useRef(0);     // a stop or restart during an async load makes the older load abort
   const [volume, setVolume] = useState(0.4);
   const [loop, setLoop] = useState(true);
   const [lowPassEnabled, setLowPassEnabled] = useState(false);
@@ -21,12 +26,16 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
   const pausedAtRef = useRef(0);
   const intervalRef = useRef(null);
   const fadeIntervalRef = useRef(null);
-  const targetVolumeRef = useRef(0.4);
+  const targetVolumeRef = useRef(0.4); // volume the user asked for; only the slider writes this, never fade tracking
   const loopControllerRef = useRef(null);
+  const stopTimeoutRef = useRef(null);
+  const pendingStopRef = useRef(null); // stops the nodes of a playback that is still fading out
   const canvasRef = useRef(null);
 
   const startCrossfadeLoop = (ctx, buffer, filter, fromOffset = 0) => {
-    const XFADE = 2;
+    // Short samples get a proportionally shorter crossfade, otherwise the
+    // scheduler would try to overlap sources faster than they play.
+    const XFADE = Math.min(2, buffer.duration / 2);
     let active = true;
     const allSources = [];
 
@@ -49,7 +58,7 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
       allSources.push(src);
       sourceRef.current = src;
 
-      const nextAt = startAt + playDuration - XFADE;
+      const nextAt = Math.max(startAt + playDuration - XFADE, ctx.currentTime);
       const delay = (nextAt - ctx.currentTime) * 1000 - 100;
       setTimeout(() => { if (active) scheduleSource(nextAt, 0); }, Math.max(0, delay));
     };
@@ -74,10 +83,12 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
 
   // -------- PLAYBACK --------
   const startPlayback = async (ctx, skipFade = false) => {
+    const token = ++playTokenRef.current;
+
     // --- SETUP NODES ---
     if (!gainNodeRef.current) {
       const gain = ctx.createGain();
-      gain.gain.value = skipFade ? volume : 0;
+      gain.gain.value = skipFade ? targetVolumeRef.current : 0;
       gain.connect(ctx.destination);
       if (analyserNode) gain.connect(analyserNode);
       gainNodeRef.current = gain;
@@ -95,6 +106,7 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
     // --- LOAD AND DECODE ---
     if (!bufferRef.current) {
       const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status} loading sound`);
       const arrayBuffer = await response.arrayBuffer();
       // Use callback-style decodeAudioData for iOS Safari compatibility
       // (Promise-based API silently fails on some iOS versions)
@@ -105,6 +117,9 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
 
     // Re-resume context here in case iOS suspended it during the async fetch
     if (ctx.state === "suspended") await ctx.resume();
+
+    // Stopped, or restarted, while loading: the newer call owns playback now
+    if (token !== playTokenRef.current) return;
 
     const buffer = bufferRef.current;
     setDuration(buffer.duration);
@@ -126,10 +141,9 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
     }
 
     if (!skipFade) {
-      targetVolumeRef.current = volume;
-      const FADE_RATE = 0.1; // gain units per second (0→1 in 10s)
-      const fadeInDuration = volume / FADE_RATE;
-      gainNodeRef.current.gain.linearRampToValueAtTime(volume, ctx.currentTime + fadeInDuration);
+      const target = targetVolumeRef.current;
+      const fadeInDuration = target / FADE_RATE;
+      gainNodeRef.current.gain.linearRampToValueAtTime(target, ctx.currentTime + fadeInDuration);
       startFadeTracking(fadeInDuration * 1000);
     }
 
@@ -143,6 +157,7 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
       setCurrentTime(position);
       if (!loop && position >= buffer.duration) {
         clearInterval(intervalRef.current);
+        isPlayingRef.current = false;
         setIsPlaying(false);
         pausedAtRef.current = 0;
         setCurrentTime(0);
@@ -151,8 +166,11 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
 
     // --- HANDLE END EVENT (non-loop only) ---
     if (!loop && sourceRef.current) {
-      sourceRef.current.onended = () => {
+      const source = sourceRef.current;
+      source.onended = () => {
+        if (sourceRef.current !== source) return; // stopped by the user or replaced by a newer playback
         clearInterval(intervalRef.current);
+        isPlayingRef.current = false;
         setIsPlaying(false);
         pausedAtRef.current = 0;
         setCurrentTime(0);
@@ -160,46 +178,89 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
     }
   };
 
-  const handleTogglePlay = async () => {
-    // Unlock and resume audio context inside the user gesture (required for iOS Safari)
-    const ctx = await unlockAudioContext();
-
-    // --- STOP if already playing ---
-    if (isPlaying) {
-      const FADE_RATE = 0.1;
-      const currentGain = gainNodeRef.current ? gainNodeRef.current.gain.value : 0;
-      const fadeOutDuration = currentGain / FADE_RATE;
-      if (gainNodeRef.current) {
-        gainNodeRef.current.gain.cancelScheduledValues(ctx.currentTime);
-        gainNodeRef.current.gain.setValueAtTime(currentGain, ctx.currentTime);
-        gainNodeRef.current.gain.linearRampToValueAtTime(0, ctx.currentTime + fadeOutDuration);
-        startFadeTracking(fadeOutDuration * 1000);
+  const stopPlayback = () => {
+    const ctx = getAudioContext();
+    playTokenRef.current++; // abort any load still in flight
+    const currentGain = gainNodeRef.current ? gainNodeRef.current.gain.value : 0;
+    const fadeOutDuration = currentGain / FADE_RATE;
+    if (gainNodeRef.current) {
+      gainNodeRef.current.gain.cancelScheduledValues(ctx.currentTime);
+      gainNodeRef.current.gain.setValueAtTime(currentGain, ctx.currentTime);
+      gainNodeRef.current.gain.linearRampToValueAtTime(0, ctx.currentTime + fadeOutDuration);
+      startFadeTracking(fadeOutDuration * 1000);
+    }
+    const ctrl = loopControllerRef.current;
+    const src = sourceRef.current;
+    let timer = null;
+    const finishStop = () => {
+      if (ctrl) ctrl.stop();
+      else { try { src?.stop(); } catch (_) {} }
+      // Only clear what this stop owns; a newer playback or stop may have replaced it
+      if (loopControllerRef.current === ctrl) loopControllerRef.current = null;
+      if (sourceRef.current === src) sourceRef.current = null;
+      if (stopTimeoutRef.current === timer) {
+        stopTimeoutRef.current = null;
+        pendingStopRef.current = null;
       }
-      const ctrl = loopControllerRef.current;
-      const src = sourceRef.current;
-      setTimeout(() => {
-        if (ctrl) ctrl.stop();
-        else { try { src?.stop(); } catch (_) {} }
-        loopControllerRef.current = null;
-      }, fadeOutDuration * 1000);
-      pausedAtRef.current = ctx.currentTime - startTimeRef.current;
-      clearInterval(intervalRef.current);
-      setIsPlaying(false);
+    };
+    pendingStopRef.current = finishStop;
+    timer = setTimeout(finishStop, fadeOutDuration * 1000);
+    stopTimeoutRef.current = timer;
+    if (ctrl || src) {
+      const elapsed = ctx.currentTime - startTimeRef.current;
+      pausedAtRef.current = loop && bufferRef.current ? elapsed % bufferRef.current.duration : elapsed;
+    }
+    clearInterval(intervalRef.current);
+    isPlayingRef.current = false;
+    setIsPlaying(false);
+  };
+
+  const handleTogglePlay = async () => {
+    // --- STOP if already playing (decided on the ref, not on stale render state) ---
+    if (isPlayingRef.current) {
+      stopPlayback();
       return;
     }
 
+    isPlayingRef.current = true;
     setIsPlaying(true);
     setError(null);
+
+    // Unlock and resume audio context inside the user gesture (required for iOS Safari)
+    const ctx = await unlockAudioContext();
+
+    // Re-play during a fade-out: cut the old sources now so they do not ride the new fade-in
+    if (stopTimeoutRef.current) {
+      clearTimeout(stopTimeoutRef.current);
+      pendingStopRef.current?.();
+    }
 
     try {
       await startPlayback(ctx, false);
     } catch (err) {
       console.error("Playback error:", err);
       setError(err.message || "Audio failed");
+      isPlayingRef.current = false;
       setIsPlaying(false);
       clearInterval(intervalRef.current);
     }
   };
+
+  // Registry handles: explicit intent, idempotent, used by PadGrid / presets / timeline
+  const handlersRef = useRef({ play: () => {}, stop: () => {} });
+  useEffect(() => {
+    handlersRef.current = {
+      play: () => { if (!isPlayingRef.current) handleTogglePlay(); },
+      stop: () => { if (isPlayingRef.current) stopPlayback(); },
+    };
+  });
+  useEffect(() => {
+    padRegistry.set(name, {
+      play: () => handlersRef.current.play(),
+      stop: () => handlersRef.current.stop(),
+    });
+    return () => { padRegistry.delete(name); };
+  }, [name]);
 
   // -------- CONTROLS --------
   const handleVolumeChange = (e) => {
@@ -207,7 +268,8 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
     clearInterval(fadeIntervalRef.current);
     targetVolumeRef.current = newVol;
     setVolume(newVol);
-    if (gainNodeRef.current) {
+    // While a fade-out is still running, only record the new target; the next play uses it
+    if (gainNodeRef.current && !stopTimeoutRef.current) {
       const actx = getAudioContext();
       gainNodeRef.current.gain.cancelScheduledValues(actx.currentTime);
       gainNodeRef.current.gain.setValueAtTime(newVol, actx.currentTime);
@@ -216,7 +278,7 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
 
   const handleScrub = async (e) => {
     const newTime = parseFloat(e.target.value);
-    const wasPlaying = isPlaying;
+    const wasPlaying = isPlayingRef.current;
     const ctx = getAudioContext();
 
     // Stop current playback without touching gain
@@ -283,6 +345,7 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
     return () => {
       clearInterval(intervalRef.current);
       clearInterval(fadeIntervalRef.current);
+      clearTimeout(stopTimeoutRef.current);
       if (loopControllerRef.current) loopControllerRef.current.stop();
       else { try { sourceRef.current?.stop(); } catch {} }
     };
@@ -455,10 +518,13 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
   return (
     <div
       style={{
+        position: "relative",
         background: isPlaying
           ? "linear-gradient(180deg, #1a3a42, #0f2530)"
+          : error
+          ? "linear-gradient(180deg, #2a1a1a, #1a0f0f)"
           : "linear-gradient(180deg, #121922, #0c121a)",
-        border: isPlaying ? "1.5px solid #6ccff6" : "1px solid #233142",
+        border: isPlaying ? "1.5px solid #6ccff6" : error ? "1px solid #8a3a3a" : "1px solid #233142",
         borderRadius: "22px",
         padding: "20px",
         boxShadow: isPlaying
@@ -469,6 +535,11 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
         transition: "all 0.2s ease",
       }}
     >
+      {error && (
+        <div style={{ position: "absolute", top: 0, left: 0, right: 0, background: "#5a1a1a", color: "#ff9999", fontSize: "11px", padding: "3px 8px", borderRadius: "22px 22px 0 0", textAlign: "center" }}>
+          ⚠ {error}
+        </div>
+      )}
       <h3 style={{ marginBottom: "10px", fontWeight: "600", fontSize: "16px" }}>
         {isPlaying && <span style={{ color: "#6ccff6" }}>🔵 </span>}
         {name}
