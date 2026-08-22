@@ -29,14 +29,14 @@ export function getAudioContext() {
  * Resumes the context AND plays a silent buffer to unlock iOS Safari audio.
  *
  * Calls ctx.resume() synchronously (no await) so the gesture context is not
- * lost, then immediately plays a 1-sample silent buffer — the minimum required
+ * lost, then immediately plays a 1-sample silent buffer, the minimum required
  * to unlock iOS audio. Returns a Promise that resolves once the context is running.
  */
 export function unlockAudioContext() {
   const ctx = getAudioContext();
   if (ctx === SSR_MOCK) return Promise.resolve(ctx);
 
-  // Play silent buffer synchronously within the gesture — this is what iOS needs
+  // Play silent buffer synchronously within the gesture; this is what iOS needs
   if (!_unlocked) {
     const buf = ctx.createBuffer(1, 1, ctx.sampleRate);
     const src = ctx.createBufferSource();

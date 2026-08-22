@@ -1,13 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    // Explicitly allow LocalTunnel HTTPS URLs during dev
-    allowedDevOrigins: [
-      "https://*.loca.lt",
-      "https://localhost:3000",
-      "http://localhost:3000",
-    ],
-  },
+  // Hostnames allowed to hit the dev server (LocalTunnel for phone testing)
+  allowedDevOrigins: ["*.loca.lt", "localhost"],
 };
 
 export default nextConfig;

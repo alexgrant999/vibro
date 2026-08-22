@@ -2,8 +2,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Vibro Acoustic App",
-  description: "12-button vibro acoustic pad player",
+  title: "Vibro Acoustic Therapy",
+  description: "Binaural beat generator, curated sound pads and a session timeline for vibro-acoustic sound therapy",
 };
 
 export default function RootLayout({ children }) {
