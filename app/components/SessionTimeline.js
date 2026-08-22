@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from "react";
 import { unlockAudioContext } from "./audioContext";
 import { timelinePresets } from "./timelinePresets";
 
@@ -41,11 +41,10 @@ function fmt(s) {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 }
 
-export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSounds, onApplyOscillator }) {
+const SessionTimeline = forwardRef(function SessionTimeline({ categoryMap, onPlaySounds, onStopSounds, onApplyOscillator }, ref) {
   const [isRunning,   setIsRunning]   = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [placedItems, setPlacedItems] = useState([]);
-  const [nextId,      setNextId]      = useState(1);
   const [activePreset, setActivePreset] = useState(null);
   const nextIdRef = useRef(1);
   const [dragOver,    setDragOver]    = useState(false);
@@ -93,24 +92,45 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
     const elapsed = (now - startEpochRef.current) / 1000 + offsetRef.current;
     const t       = elapsed % DURATION;
     const prev    = prevTimeRef.current;
-    if (t < prev - 1) activeSounds.current.clear();
+    const active  = activeSounds.current;
+    const toStop  = [];
+    const toStart = [];
 
+    // Loop wrap: everything still sounding at the end of the session exits here
+    if (t < prev - 1) {
+      active.forEach((sounds) => toStop.push(...sounds));
+      active.clear();
+    }
+
+    const inside = (item) => t >= item.time && t < item.time + item.duration;
+
+    // Leavers first, so a block entered this tick can reuse a sound that is leaving another
     placedRef.current.forEach((item) => {
-      const end    = item.time + item.duration;
-      const id     = item.id;
-      const inside = t >= item.time && t < end;
-      if (inside && !activeSounds.current.has(id)) {
-        const pool   = categoryMap[item.category] || [];
-        const count  = Math.min(2, pool.length);
-        const picked = [...pool].sort(() => Math.random() - 0.5).slice(0, count).map((s) => s.name);
-        activeSounds.current.set(id, picked);
-        onPlaySounds(picked);
-      }
-      if (!inside && activeSounds.current.has(id)) {
-        onStopSounds(activeSounds.current.get(id));
-        activeSounds.current.delete(id);
+      if (!inside(item) && active.has(item.id)) {
+        toStop.push(...active.get(item.id));
+        active.delete(item.id);
       }
     });
+
+    const playingNow = new Set([...active.values()].flat());
+    placedRef.current.forEach((item) => {
+      if (inside(item) && !active.has(item.id)) {
+        const pool   = categoryMap[item.category] || [];
+        const want   = Math.min(2, pool.length);
+        const fresh  = pool.filter((s) => !playingNow.has(s.name));
+        const from   = fresh.length >= want ? fresh : pool;
+        const picked = [...from].sort(() => Math.random() - 0.5).slice(0, want).map((s) => s.name);
+        active.set(item.id, picked);
+        picked.forEach((n) => playingNow.add(n));
+        toStart.push(...picked);
+      }
+    });
+
+    // A sound that ends in one block and starts in another on the same tick keeps playing
+    const starting = new Set(toStart);
+    const stopping = toStop.filter((n) => !starting.has(n));
+    if (stopping.length) onStopSounds(stopping);
+    if (toStart.length)  onPlaySounds(toStart);
 
     prevTimeRef.current    = t;
     currentTimeRef.current = t;
@@ -119,22 +139,25 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
   }, [categoryMap, onPlaySounds, onStopSounds]);
 
   useEffect(() => {
-    if (!isRunning) { cancelAnimationFrame(rafRef.current); return; }
+    if (!isRunning) return;
     startEpochRef.current = performance.now();
     rafRef.current = requestAnimationFrame(tick);
     return () => {
-      if (startEpochRef.current !== null) {
-        offsetRef.current = ((performance.now() - startEpochRef.current) / 1000 + offsetRef.current) % DURATION;
-      }
       cancelAnimationFrame(rafRef.current);
+      // Resume from where the playhead was last drawn
+      offsetRef.current = currentTimeRef.current;
     };
   }, [isRunning, tick]);
+
+  const stopActiveSounds = useCallback(() => {
+    const all = [...activeSounds.current.values()].flat();
+    activeSounds.current.clear();
+    if (all.length) onStopSounds(all);
+  }, [onStopSounds]);
 
   // ── Controls ──────────────────────────────────────────────────────────────
   const handlePlayPause = async () => {
     if (isRunning) {
-      offsetRef.current = (performance.now() - startEpochRef.current) / 1000 % DURATION + offsetRef.current;
-      offsetRef.current = offsetRef.current % DURATION;
       setIsRunning(false);
     } else {
       // Unlock the AudioContext inside this real user gesture so that
@@ -145,17 +168,27 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
   };
 
   const handleReset = () => {
+    cancelAnimationFrame(rafRef.current); // no further tick before the effect cleanup runs
     setIsRunning(false);
-    offsetRef.current   = 0;
-    prevTimeRef.current = 0;
-    activeSounds.current.clear();
+    offsetRef.current      = 0;
+    prevTimeRef.current    = 0;
+    currentTimeRef.current = 0;
+    stopActiveSounds();
     setCurrentTime(0);
   };
+
+  // Used by Stop All: hold the playhead and silence everything the timeline started
+  useImperativeHandle(ref, () => ({
+    stop: () => {
+      cancelAnimationFrame(rafRef.current);
+      setIsRunning(false);
+      stopActiveSounds();
+    },
+  }), [stopActiveSounds]);
 
   const loadPreset = (preset) => {
     const items = preset.items.map((it, i) => ({ ...it, id: nextIdRef.current + i }));
     nextIdRef.current += preset.items.length;
-    setNextId(nextIdRef.current);
     setPlacedItems(items);
     setActivePreset(preset);
     if (preset.oscillator) onApplyOscillator?.(preset.oscillator);
@@ -267,7 +300,6 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
     const row  = clientYToRow(e.clientY);
     setPlacedItems((prev) => [...prev, { id: nextIdRef.current, category: cat, time, duration: 60, row }]);
     nextIdRef.current += 1;
-    setNextId(nextIdRef.current);
     setActivePreset(null);
     paletteDragRef.current = null;
   };
@@ -303,7 +335,6 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
           { id: nextIdRef.current, category: paletteTouchCatRef.current, time, duration: 120, row },
         ]);
         nextIdRef.current += 1;
-        setNextId(nextIdRef.current);
         setActivePreset(null);
       }
       paletteTouchCatRef.current = null;
@@ -316,7 +347,7 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
       document.removeEventListener("touchmove", handleDocTouchMove);
       document.removeEventListener("touchend",  handleDocTouchEnd);
     };
-  }, [pxToTime, clientYToRow]); // no nextId dep — use nextIdRef to avoid re-registering listeners
+  }, [pxToTime, clientYToRow]); // nextIdRef instead of state so the listeners are not re-registered on every drop
 
   const onPaletteTouchStart = (e, cat) => {
     paletteTouchCatRef.current = cat;
@@ -422,7 +453,7 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
               <span style={{ color: "#6ccff6" }}>× Button</span>
               <span>tap × on a block to remove it</span>
               <span style={{ color: "#6ccff6" }}>▶ Play</span>
-              <span>the green playhead sweeps across — sounds play when it enters a block</span>
+              <span>the green playhead sweeps across and sounds play when it enters a block</span>
             </> : <>
               <span style={{ color: "#6ccff6" }}>Drag chip</span>
               <span>drag a sound group from the palette onto the timeline grid</span>
@@ -433,7 +464,7 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
               <span style={{ color: "#6ccff6" }}>× Button</span>
               <span>click × to remove a block</span>
               <span style={{ color: "#6ccff6" }}>▶ Play</span>
-              <span>the playhead sweeps across the 10-min loop — sounds play when it enters a block</span>
+              <span>the playhead sweeps across the 10-min loop and sounds play when it enters a block</span>
             </>}
           </div>
         </div>
@@ -688,9 +719,11 @@ export default function SessionTimeline({ categoryMap, onPlaySounds, onStopSound
         <p style={{ textAlign: "center", fontSize: "12px", color: "#283c4e", margin: "8px 0 0" }}>
           {isTouch
             ? "Press and drag a group from the palette above onto the timeline"
-            : "No groups placed — drag one from the palette above"}
+            : "No groups placed yet. Drag one from the palette above"}
         </p>
       )}
     </div>
   );
-}
+});
+
+export default SessionTimeline;

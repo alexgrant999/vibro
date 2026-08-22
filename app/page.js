@@ -18,8 +18,17 @@ categoryMap["Binaural Beats"] = [{ name: "__binaural__" }];
 export default function Home() {
   const padGridRef = useRef(null);
   const oscillatorRef = useRef(null);
+  const timelineRef = useRef(null);
   const progressionIntervalRef = useRef(null);
   const progressionStartRef = useRef(null);
+
+  // Stop All: pads are stopped by PadGrid itself, this covers everything else
+  const stopEverything = () => {
+    clearInterval(progressionIntervalRef.current);
+    progressionIntervalRef.current = null;
+    timelineRef.current?.stop();
+    oscillatorRef.current?.stop();
+  };
 
   const applyPreset = (config) => {
     // Stop any ongoing progression
@@ -61,12 +70,12 @@ export default function Home() {
   };
 
   const playShamanicFlourish = () => {
-    // Play shamanic effect sounds in sequence
+    // Names must match sounds.js exactly, emoji included
     const flourishPads = [
       "🪶 Flute Swishes",
-      "Ocarina Call 1",
-      "Shaman Voice",
-      "Leaves Rustle",
+      "🪘 Ocarina Call 1",
+      "🔮 Shaman Voice",
+      "🍃 Leaves Rustle",
     ];
 
     // Play the flourish effects
@@ -121,17 +130,21 @@ export default function Home() {
         </p>
       </div>
 
-      {/* Session Timeline — desktop only (iOS audio policy blocks programmatic playback) */}
+      {/* Session Timeline, desktop only (iOS audio policy blocks programmatic playback) */}
       <div className="desktop-only" style={{ padding: "0 40px", marginBottom: "40px" }}>
         <SessionTimeline
+          ref={timelineRef}
           categoryMap={categoryMap}
           onPlaySounds={useCallback((names) => {
+            // One tick can start the generator and pads together
             if (names.includes("__binaural__")) oscillatorRef.current?.start();
-            else padGridRef.current?.playPads(names);
+            const pads = names.filter((n) => n !== "__binaural__");
+            if (pads.length) padGridRef.current?.playPads(pads);
           }, [])}
           onStopSounds={useCallback((names) => {
             if (names.includes("__binaural__")) oscillatorRef.current?.stop();
-            else padGridRef.current?.stopPads(names);
+            const pads = names.filter((n) => n !== "__binaural__");
+            if (pads.length) padGridRef.current?.stopPads(pads);
           }, [])}
           onApplyOscillator={useCallback((params) => {
             oscillatorRef.current?.setParams(params, { autoStart: false });
@@ -164,11 +177,7 @@ export default function Home() {
         </h2>
 
         {/* Oscillator */}
-        <OscillatorUnit
-          ref={oscillatorRef}
-          id={1}
-          initialFreq={null}
-        />
+        <OscillatorUnit ref={oscillatorRef} />
 
         {/* Presets */}
         <div style={{ marginTop: "28px" }}>
@@ -205,7 +214,7 @@ export default function Home() {
                           carrierFreq: Math.max(20, newCarrier),
                           beatFreq: 2,
                           volume: newVolume,
-                        });
+                        }, { autoStart: false });
                       }
                     },
                   },
@@ -224,7 +233,7 @@ export default function Home() {
                           carrierFreq: 100,
                           beatFreq: beatCycle,
                           volume: 0.15,
-                        });
+                        }, { autoStart: false });
                       }
                     },
                   },
@@ -244,7 +253,7 @@ export default function Home() {
                           carrierFreq: Math.min(200, newCarrier),
                           beatFreq: Math.min(40, newBeat),
                           volume: 0.18,
-                        });
+                        }, { autoStart: false });
                       }
                     },
                   },
@@ -263,7 +272,7 @@ export default function Home() {
                           carrierFreq: 80,
                           beatFreq: beatPulse,
                           volume: 0.14,
-                        });
+                        }, { autoStart: false });
                       }
                     },
                   },
@@ -282,7 +291,7 @@ export default function Home() {
                           carrierFreq: 120,
                           beatFreq: newBeat,
                           volume: 0.16,
-                        });
+                        }, { autoStart: false });
                       }
                     },
                   },
@@ -360,7 +369,7 @@ export default function Home() {
 
       {/* Pads Grid */}
       <div style={{ padding: "0 40px", marginBottom: "40px" }}>
-        <PadGrid ref={padGridRef} />
+        <PadGrid ref={padGridRef} onStopAll={stopEverything} />
       </div>
 
     </main>
