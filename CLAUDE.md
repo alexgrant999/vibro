@@ -8,9 +8,9 @@ Vibro-Acoustic App is a single-page Next.js 15 sound therapy console built on th
 
 - Session Timeline (desktop only): a 10-minute, 5-row drag-and-drop arrangement of sound categories with six preset arrangements. A requestAnimationFrame clock starts and stops pads and the binaural generator as the playhead enters and leaves blocks.
 - Master Control: the binaural beat generator (left and right carriers into a ChannelMerger, with sweeps that bounce carrier and beat between their range min and max), five inline preset mixes that each set and start the generator, start pads, and run a 20-minute progression, and a Shamanic Flourish button.
-- Pad grid: 47 WAV sample pads in 9 collapsible categories, list or grid view, a live RMS level meter per category, and a Stop All button.
+- Pad grid: 47 AAC sample pads in 9 collapsible categories, list or grid view, a live RMS level meter per category, and a Stop All button.
 
-Audio is served from `public/sounds/` (about 600 MB of WAV, all tracked in git). There is no backend, no database, and no tests. Deployed on Vercel from github.com/alexgrant999/vibro.
+Audio is served from `public/sounds/` as AAC in `.m4a` (47 files, about 88 MB, tracked in git; the original WAVs are kept outside the repo in `~/development/Archive/vibro-acoustic-wav-originals/`). There is no backend, no database, and no tests. Deployed on Vercel from github.com/alexgrant999/vibro.
 
 ## Development Commands
 
@@ -44,7 +44,8 @@ app/
     SessionTimeline.js         # Timeline editor and RAF playback engine; stop() imperative handle
     timelinePresets.js         # Six preset arrangements for the timeline
   testaudio/page.js            # Unlinked square-wave smoke test page
-public/sounds/                 # WAV samples referenced by sounds.js
+public/sounds/                 # AAC (.m4a) samples referenced by sounds.js
+scripts/encode-sample.py       # afconvert plus exact edit list, for new samples
 next.config.mjs                # allowedDevOrigins for LocalTunnel phone testing
 ```
 
@@ -66,7 +67,7 @@ Because pads are matched by exact display name, any name passed to `playPads`, a
 
 - One module-level `AudioContext` from `getAudioContext()`. It is created on first render (PadGrid creates analysers), so it starts suspended. `unlockAudioContext()` plays a one-frame silent buffer and calls `resume()` synchronously inside a user gesture; every play path calls it first.
 - Pad signal chain: `BufferSource -> crossfade Gain (loop mode) -> BiquadFilter lowpass -> pad Gain -> destination`, with a tap into the category `AnalyserNode`. No master bus.
-- Pads fetch and decode their sample on first play (callback-style `decodeAudioData` for iOS) and cache the buffer for the life of the component.
+- Pads fetch and decode their sample on first play (callback-style `decodeAudioData` for iOS) and cache the buffer for the life of the component. Samples are AAC-LC `.m4a` with exact gapless metadata (iTunSMPB tag plus an `elst` edit list), so `buffer.duration` equals the source length in Chrome and Safari; Firefox honours the edit list's head trim but keeps up to about 23 ms of trailing encoder padding, which sits under the loop crossfade.
 - Loop mode is a manual chain of overlapping sources with a crossfade of up to 2 s (shorter for short samples), scheduled by `setTimeout`.
 - All fades run at `FADE_RATE` 0.1 gain per second. Pad sliders start at 0; once a sample has loaded the gain fades in to the 40% default (or whatever the slider was set to). Fade tracking polls the gain into the volume slider so the slider animates; the volume the user actually asked for lives in a ref (`targetVolumeRef` in Pad, `intendedVolumeRef` in OscillatorUnit) and is what a new play fades up to. Stopping a pad defers the real `stop()` until the fade-out finishes; re-playing during that window cuts the old sources immediately.
 - Generator graph is rebuilt on every start: `oscLeft (carrier)` and `oscRight (carrier + beat)` -> unity gains -> `ChannelMerger(2)` -> master Gain -> destination. The sweep is a 100 ms `setInterval` that bounces each value between range min and max, eased at the edges with about 15% step jitter. `setParams({ volume })` while playing glides the gain at the fade rate.
@@ -99,7 +100,7 @@ Inline styles throughout. `globals.css` holds a few legacy rules plus `.desktop-
 ## Common Development Tasks
 
 Adding a sound pad:
-1. Drop the WAV in `public/sounds/`.
+1. Encode it with `python3 scripts/encode-sample.py in.wav public/sounds/name.m4a` (macOS: afconvert at 256 kbps constrained VBR, then an exact `elst` edit list written into the file; it refuses to ship a file whose valid frame count differs from the source). 256 kbps because 192 cut the wind chimes above 16 kHz. Do not substitute ffmpeg: its `aac_at` wrapper gets the valid frame count wrong by hundreds of samples per file and its `-c copy` remux drops the iTunSMPB tag. Pads fetch the whole file and hand it to `decodeAudioData`, so any format the browser decodes would work, but keep the library uniform.
 2. Add `{ name, file, category }` to `soundFiles` in `app/components/sounds.js`. Keep the emoji prefix convention.
 3. If it is a new category, add its icon to `CATEGORY_ICONS` in `PadGrid.js` and its colour and icon to `CAT_COLORS` / `CAT_ICONS` in `SessionTimeline.js`.
 

@@ -19,4 +19,4 @@ Driving the app
 Gotchas
 
 - claude-in-chrome screenshots can fail with "Page still loading (document_idle)" on this app even when document.readyState is complete; javascript_tool still works, so verify through DOM queries.
-- public/sounds is ~600 MB (47 wavs); audio buffers load lazily on first play, not on mount.
+- public/sounds is ~88 MB (47 AAC .m4a files); audio buffers load lazily on first play, not on mount.
