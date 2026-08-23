@@ -192,9 +192,20 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
     const ctrl = loopControllerRef.current;
     const src = sourceRef.current;
     let timer = null;
+    // The sources keep playing through the fade-out, so the position scrubber keeps
+    // moving too; it stops, and the resume point is taken, when the sources stop.
     const finishStop = () => {
+      const owns = (ctrl && loopControllerRef.current === ctrl) || (src && sourceRef.current === src);
       if (ctrl) ctrl.stop();
       else { try { src?.stop(); } catch (_) {} }
+      if (owns) {
+        clearInterval(intervalRef.current);
+        const dur = bufferRef.current?.duration;
+        let pos = ctx.currentTime - startTimeRef.current;
+        if (dur) pos = loop ? pos % dur : (pos >= dur ? 0 : pos);
+        pausedAtRef.current = pos;
+        setCurrentTime(pos);
+      }
       // Only clear what this stop owns; a newer playback or stop may have replaced it
       if (loopControllerRef.current === ctrl) loopControllerRef.current = null;
       if (sourceRef.current === src) sourceRef.current = null;
@@ -206,11 +217,6 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
     pendingStopRef.current = finishStop;
     timer = setTimeout(finishStop, fadeOutDuration * 1000);
     stopTimeoutRef.current = timer;
-    if (ctrl || src) {
-      const elapsed = ctx.currentTime - startTimeRef.current;
-      pausedAtRef.current = loop && bufferRef.current ? elapsed % bufferRef.current.duration : elapsed;
-    }
-    clearInterval(intervalRef.current);
     isPlayingRef.current = false;
     setIsPlaying(false);
   };
