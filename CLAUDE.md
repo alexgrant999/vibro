@@ -8,9 +8,9 @@ Vibro-Acoustic App is a single-page Next.js 15 sound therapy console built on th
 
 - Session Timeline (desktop only): a 10-minute, 5-row drag-and-drop arrangement of sound categories with six preset arrangements. A requestAnimationFrame clock starts and stops pads and the binaural generator as the playhead enters and leaves blocks.
 - Master Control: the binaural beat generator (left and right carriers into a ChannelMerger, with sweeps that bounce carrier and beat between their range min and max), five inline preset mixes that each set and start the generator, start pads, and run a 20-minute progression, and a Shamanic Flourish button.
-- Pad grid: 47 AAC sample pads in 9 collapsible categories, list or grid view, a live RMS level meter per category, and a Stop All button.
+- Pad grid: 48 AAC sample pads in 9 collapsible categories, list or grid view, a live RMS level meter per category, and a Stop All button.
 
-Audio is served from `public/sounds/` as AAC in `.m4a` (47 files, about 88 MB, tracked in git; the original WAVs are kept outside the repo in `~/development/Archive/vibro-acoustic-wav-originals/`). There is no backend, no database, and no tests. Deployed on Vercel from github.com/alexgrant999/vibro.
+Audio is served from `public/sounds/` as AAC in `.m4a` (48 files, about 88 MB, tracked in git; the original WAVs are kept outside the repo in `~/development/Archive/vibro-acoustic-wav-originals/`). There is no backend, no database, and no tests. Deployed on Vercel from github.com/alexgrant999/vibro.
 
 ## Development Commands
 

@@ -38,6 +38,7 @@ export const soundFiles = [
   { name: "🪶 Flute FX 1", file: "flute-fx-1.m4a", category: "Flutes" },
   { name: "🪶 Flute FX 2", file: "flute-fx-2.m4a", category: "Flutes" },
   { name: "🪶 Flute FX 3", file: "flute-fx-3.m4a", category: "Flutes" },
+  { name: "🪶 Breathy Wooden Flute", file: "flute-breathy-wooden.m4a", category: "Flutes" },
 
   // Tuned Notes
   { name: "🎵 Note A", file: "note-a.m4a", category: "Tuned Notes" },
