@@ -10,7 +10,7 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
   const [isPlaying, setIsPlaying] = useState(false);
   const isPlayingRef = useRef(false); // decided synchronously so two clicks before a re-render cannot both start or both stop
   const playTokenRef = useRef(0);     // a stop or restart during an async load makes the older load abort
-  const [volume, setVolume] = useState(0.4);
+  const [volume, setVolume] = useState(0); // slider starts at 0 and climbs as the first play fades in
   const [loop, setLoop] = useState(true);
   const [lowPassEnabled, setLowPassEnabled] = useState(false);
   const [lowPassFreq, setLowPassFreq] = useState(5000); // Hz
@@ -26,7 +26,7 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
   const pausedAtRef = useRef(0);
   const intervalRef = useRef(null);
   const fadeIntervalRef = useRef(null);
-  const targetVolumeRef = useRef(0.4); // volume the user asked for; only the slider writes this, never fade tracking
+  const targetVolumeRef = useRef(0.4); // level a play fades up to (40% by default); only the slider writes this, never fade tracking
   const loopControllerRef = useRef(null);
   const stopTimeoutRef = useRef(null);
   const pendingStopRef = useRef(null); // stops the nodes of a playback that is still fading out
