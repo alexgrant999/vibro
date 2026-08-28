@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { getAudioContext, unlockAudioContext } from "./audioContext";
+import { getAudioContext, getOutputNode, unlockAudioContext } from "./audioContext";
 import { padRegistry } from "./padRegistry";
 
 const FADE_RATE = 0.1; // gain units per second (0 to 1 in 10 s)
@@ -89,7 +89,7 @@ export default function Pad({ name, url, listView = false, analyserNode = null }
     if (!gainNodeRef.current) {
       const gain = ctx.createGain();
       gain.gain.value = skipFade ? targetVolumeRef.current : 0;
-      gain.connect(ctx.destination);
+      gain.connect(getOutputNode());
       if (analyserNode) gain.connect(analyserNode);
       gainNodeRef.current = gain;
     } else if (!skipFade) {

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useImperativeHandle } from "react";
-import { getAudioContext, unlockAudioContext } from "./audioContext";
+import { getAudioContext, getOutputNode, unlockAudioContext } from "./audioContext";
 import { forwardRef } from "react";
 
 const FADE_RATE = 0.1; // gain units per second, shared by fade-in, fade-out and preset glides
@@ -192,7 +192,7 @@ const OscillatorUnit = forwardRef(function OscillatorUnit(_props, ref) {
 
     const masterGain = actx.createGain();
     masterGain.gain.value = 0;
-    masterGain.connect(actx.destination);
+    masterGain.connect(getOutputNode());
     const fadeInDuration = Math.max(targetVol / FADE_RATE, 0.05);
     masterGain.gain.setValueAtTime(0, actx.currentTime);
     masterGain.gain.linearRampToValueAtTime(targetVol, actx.currentTime + fadeInDuration);

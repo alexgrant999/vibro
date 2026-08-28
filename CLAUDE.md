@@ -35,7 +35,7 @@ app/
   page.js                      # Home page: orchestrator, preset mixes, Stop All wiring
   globals.css                  # Minimal global styles and the .desktop-only rule
   components/
-    audioContext.js            # AudioContext singleton, SSR mock, unlockAudioContext()
+    audioContext.js            # AudioContext singleton, SSR mock, unlockAudioContext(), getOutputNode() media-element output stage
     sounds.js                  # Sample registry: name, file, category (names include an emoji prefix)
     Pad.js                     # One sample pad: lazy decode, crossfade loop, fades, lowpass, scrub
     padRegistry.js             # Map of mounted pads' play()/stop() handles, keyed by display name
@@ -66,11 +66,12 @@ Because pads are matched by exact display name, any name passed to `playPads`, a
 ### Audio engine
 
 - One module-level `AudioContext` from `getAudioContext()`. It is created on first render (PadGrid creates analysers), so it starts suspended. `unlockAudioContext()` plays a one-frame silent buffer and calls `resume()` synchronously inside a user gesture; every play path calls it first.
-- Pad signal chain: `BufferSource -> crossfade Gain (loop mode) -> BiquadFilter lowpass -> pad Gain -> destination`, with a tap into the category `AnalyserNode`. No master bus.
+- All sound sources connect to `getOutputNode()` (a shared gain in `audioContext.js`), never to `ctx.destination` directly. The output node feeds a `MediaStreamAudioDestinationNode` playing through a hidden `<audio>` element, because iOS does not route raw Web Audio to the AirPlay device picked in Control Center but does route media-element playback. `unlockAudioContext()` (re)starts that element inside each play gesture — iOS pauses it on route changes — and a rejected `play()` falls the output back to `ctx.destination` permanently.
+- Pad signal chain: `BufferSource -> crossfade Gain (loop mode) -> BiquadFilter lowpass -> pad Gain -> output node`, with a tap into the category `AnalyserNode`. No master bus beyond the shared output node.
 - Pads fetch and decode their sample on first play (callback-style `decodeAudioData` for iOS) and cache the buffer for the life of the component. Samples are AAC-LC `.m4a` with exact gapless metadata (iTunSMPB tag plus an `elst` edit list), so `buffer.duration` equals the source length in Chrome and Safari; Firefox honours the edit list's head trim but keeps up to about 23 ms of trailing encoder padding, which sits under the loop crossfade.
 - Loop mode is a manual chain of overlapping sources with a crossfade of up to 2 s (shorter for short samples), scheduled by `setTimeout`.
 - All fades run at `FADE_RATE` 0.1 gain per second. Pad sliders start at 0; once a sample has loaded the gain fades in to the 40% default (or whatever the slider was set to). Fade tracking polls the gain into the volume slider so the slider animates; the volume the user actually asked for lives in a ref (`targetVolumeRef` in Pad, `intendedVolumeRef` in OscillatorUnit) and is what a new play fades up to. Stopping a pad defers the real `stop()` until the fade-out finishes; re-playing during that window cuts the old sources immediately.
-- Generator graph is rebuilt on every start: `oscLeft (carrier)` and `oscRight (carrier + beat)` -> unity gains -> `ChannelMerger(2)` -> master Gain -> destination. The sweep is a 100 ms `setInterval` that bounces each value between range min and max, eased at the edges with about 15% step jitter. `setParams({ volume })` while playing glides the gain at the fade rate.
+- Generator graph is rebuilt on every start: `oscLeft (carrier)` and `oscRight (carrier + beat)` -> unity gains -> `ChannelMerger(2)` -> master Gain -> output node. The sweep is a 100 ms `setInterval` that bounces each value between range min and max, eased at the edges with about 15% step jitter. `setParams({ volume })` while playing glides the gain at the fade rate.
 
 ### Session timeline
 
