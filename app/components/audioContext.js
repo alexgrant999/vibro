@@ -9,6 +9,7 @@ let _unlocked = false;
 let outputNode = null;   // GainNode all sources connect to instead of ctx.destination
 let outputEl = null;     // hidden <audio> element carrying the stream
 let outputMode = null;   // "element" | "direct" (fallback)
+let userPaused = false;  // paused via the system Now Playing card, so don't auto-resume
 
 const SSR_MOCK = {
   resume: () => Promise.resolve(),
@@ -57,16 +58,42 @@ function ensureOutput(ctx) {
     const el = document.createElement("audio");
     el.srcObject = streamDest.stream;
     el.setAttribute("playsinline", "");
+    el.setAttribute("x-webkit-airplay", "allow");
     el.style.display = "none";
     // Keep the element in the DOM so it is not garbage-collected mid-playback
     document.body.appendChild(el);
     outputEl = el;
     outputMode = "element";
 
-    // With a media element in the chain iOS shows a Now Playing card; give it a name
+    const replay = () => {
+      if (outputMode !== "element" || outputEl !== el || userPaused) return;
+      const p = el.play();
+      if (p && p.catch) p.catch(() => {});
+    };
+    // iOS pauses the element on audio-route changes (picking an AirPlay
+    // speaker, unplugging headphones) with no gesture available to restart
+    // it, so auto-resume unless the user paused from the Now Playing card.
+    el.addEventListener("pause", () => setTimeout(replay, 250));
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && el.paused) replay();
+    });
+
+    // With a media element in the chain iOS shows a Now Playing card; give it
+    // a name and make its play/pause buttons control the stream. Handling
+    // "pause" ourselves also marks it deliberate so auto-resume stands down.
     try {
       if ("mediaSession" in navigator) {
         navigator.mediaSession.metadata = new MediaMetadata({ title: "Vibro-Acoustic Session" });
+        navigator.mediaSession.setActionHandler("pause", () => {
+          userPaused = true;
+          el.pause();
+          navigator.mediaSession.playbackState = "paused";
+        });
+        navigator.mediaSession.setActionHandler("play", () => {
+          userPaused = false;
+          replay();
+          navigator.mediaSession.playbackState = "playing";
+        });
       }
     } catch {}
   } else {
@@ -113,6 +140,7 @@ export function unlockAudioContext() {
   // restart it on every unlock. A rejected play() means the element path is
   // unusable; fall back to direct output so sound still works locally.
   ensureOutput(ctx);
+  userPaused = false; // an explicit play gesture overrides a Now Playing pause
   if (outputMode === "element" && outputEl && outputEl.paused) {
     const p = outputEl.play();
     if (p && p.catch) p.catch(() => fallBackToDirect());
